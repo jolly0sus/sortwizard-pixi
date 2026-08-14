@@ -23,6 +23,7 @@ import { FillBoxManager } from "./entities/FillBoxes.js";
 import { Multiplier } from "./entities/Multiplier.js";
 import { Ball } from "./entities/Ball.js";
 import { cancelAll } from "./tween.js";
+import { mountHud } from "./hud.js";
 import {
   buildLogo,
   buildCTA,
@@ -45,12 +46,28 @@ const laneReleaseY = () => LAYOUT.multiplier.centerY + 46;
 // laps is the shortest that still cannot fire on a board that is merely busy.
 const JAM_FAIL_SECONDS = 1.5 * LAYOUT.conveyor.loopSeconds;
 
+// Phones are the target, and three defaults are wrong for them. MSAA on the
+// default framebuffer costs real bandwidth on tile-based mobile GPUs for very
+// little here — the art is sprites, and only the procedural board edges gain
+// from it. PixiJS also prefers WebGPU when it can, which on Android browsers
+// ranges from fine to badly broken, so the renderer is pinned to WebGL. And a
+// phone's drawing buffer is capped: at devicePixelRatio 3 a tall screen means
+// a canvas of several million pixels to fill every frame.
+const isCoarsePointer =
+  typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+const MAX_MOBILE_RESOLUTION = 2;
+
 export async function createGame(containerEl) {
   const app = new Application();
   await app.init({
     background: 0x4f0589,
     resizeTo: window,
-    antialias: true,
+    antialias: !isCoarsePointer,
+    preference: "webgl",
+    resolution: isCoarsePointer
+      ? Math.min(globalThis.devicePixelRatio || 1, MAX_MOBILE_RESOLUTION)
+      : 1,
+    autoDensity: isCoarsePointer,
   });
   containerEl.appendChild(app.canvas);
 
@@ -58,7 +75,27 @@ export async function createGame(containerEl) {
   const textures = await loadTextures();
 
   let scene = buildScene(app, textures);
-  window.addEventListener("resize", () => scene.fit());
+
+  // Mobile browsers fire resize continuously while the address bar slides in
+  // and out, and each one reallocates the drawing buffer. Coalesce them into
+  // the next frame, and ignore the ones that only change height by a little,
+  // which is exactly what that address bar does.
+  let resizeQueued = false;
+  let lastW = globalThis.innerWidth;
+  let lastH = globalThis.innerHeight;
+  window.addEventListener("resize", () => {
+    const w = globalThis.innerWidth;
+    const h = globalThis.innerHeight;
+    if (w === lastW && Math.abs(h - lastH) < 120) return;
+    lastW = w;
+    lastH = h;
+    if (resizeQueued) return;
+    resizeQueued = true;
+    requestAnimationFrame(() => {
+      resizeQueued = false;
+      scene.fit();
+    });
+  });
 
   return {
     app,
@@ -242,6 +279,7 @@ function buildScene(app, textures) {
     }
   };
   app.ticker.add(tick);
+  mountHud(app, world);
 
   return {
     fit,

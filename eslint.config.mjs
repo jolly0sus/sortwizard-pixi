@@ -22,6 +22,8 @@ export default [
         Audio: "readonly",
         localStorage: "readonly",
         navigator: "readonly",
+        matchMedia: "readonly",
+        globalThis: "readonly",
         location: "readonly",
         Blob: "readonly",
         URL: "readonly",
