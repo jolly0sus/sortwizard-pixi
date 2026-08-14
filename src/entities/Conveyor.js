@@ -1,23 +1,32 @@
-import { Container, Sprite, NineSliceSprite, Graphics } from "pixi.js";
+import { Container, Sprite, MeshPlane } from "pixi.js";
 import { LAYOUT } from "../config.js";
 import { audio } from "../audio.js";
 
-// Walks LAYOUT.conveyor.shape down one flank and back along the other, so the
-// belt is a single closed outline mirrored about its centre line. `inset`
-// pulls it inward, which is how the bright inner lip is drawn from the same
-// path as the rim.
-function traceBeltPath(g, c, cy, inset = 0) {
+// How tall the belt is at a given x, from LAYOUT.conveyor.shape — half its
+// height, measured from the centre line, linearly interpolated between the
+// table's points.
+function beltHalfHeightAt(c, x) {
   const pts = c.shape;
-  const half = (h) => Math.max(0, h - inset);
-  g.moveTo(pts[0][0], cy - half(pts[0][1]));
-  for (let i = 1; i < pts.length; i++) {
-    g.lineTo(pts[i][0], cy - half(pts[i][1]));
+  if (x <= pts[0][0]) return pts[0][1];
+  const last = pts[pts.length - 1];
+  if (x >= last[0]) return last[1];
+  let lo = 0;
+  let hi = pts.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (pts[mid][0] <= x) lo = mid;
+    else hi = mid;
   }
-  for (let i = pts.length - 1; i >= 0; i--) {
-    g.lineTo(pts[i][0], cy + half(pts[i][1]));
-  }
-  g.closePath();
+  const [x0, h0] = pts[lo];
+  const [x1, h1] = pts[hi];
+  return h0 + ((h1 - h0) * (x - x0)) / (x1 - x0);
 }
+
+// Grid the belt texture is drawn on. Enough columns to follow a curve without
+// faceting; two rows would stretch the interior linearly, so a few more keep
+// the centre track where it belongs.
+const MESH_COLUMNS = 60;
+const MESH_ROWS = 6;
 
 // Stadium-shaped ("racetrack") belt: two straight runs joined by semicircular
 // ends. Only the TOP straight run captures falling balls (the original's
@@ -64,52 +73,22 @@ export class Conveyor {
     shade.alpha = c.shadowAlpha;
     this.layer.addChild(shade);
 
-    // The belt is drawn from LAYOUT.conveyor.shape rather than left as a
-    // stretched sprite, so its outline can be edited point by point like the
-    // board's. The artwork still supplies the interior — the grooves and the
-    // track line down the middle — by being masked to that outline; only the
-    // rim is drawn, along the same path.
-    const clip = new Graphics();
-    traceBeltPath(clip, c, this.cy);
-    clip.fill({ color: 0xffffff });
-    this.layer.addChild(clip);
-
-    const cap = Math.min(c.capWidth, textures.base.width / 2 - 1);
-    const base = new NineSliceSprite({
+    // The belt is the original artwork, laid over a grid whose vertices take
+    // their height from LAYOUT.conveyor.shape. Nothing new is drawn on top:
+    // the purple rim you see is the one in the texture, and bending the grid
+    // bends that rim with it, which is what makes the existing outline
+    // editable rather than replaced.
+    //
+    // With the default shape — a constant half-height — the grid is flat and
+    // the belt renders exactly as the plain sprite did.
+    const base = new MeshPlane({
       texture: textures.base,
-      leftWidth: cap,
-      rightWidth: cap,
-      topHeight: 0,
-      bottomHeight: 0,
+      verticesX: MESH_COLUMNS,
+      verticesY: MESH_ROWS,
     });
-    base.width = beltW;
-    base.height = beltH;
-    base.x = c.xLeft;
-    base.y = this.cy - beltH / 2;
-    base.mask = clip;
+    this.beltMesh = base;
     this.layer.addChild(base);
-
-    // Rim along the outline, as concentric rings rather than one flat stroke.
-    // Sampling the source art down through its edge gives a light lip on the
-    // outside falling to a deep purple against the interior (#ffc6ff, #e7aaff,
-    // #c179e6, #8129a2), and a single colour lost that roundness completely.
-    const rim = new Graphics();
-    const rings = [
-      { inset: -2, width: 6, color: 0xffc6ff, alpha: 0.9 },
-      { inset: 1, width: 10, color: c.rimLight, alpha: 1 },
-      { inset: 5, width: 9, color: 0xc179e6, alpha: 1 },
-      { inset: 9, width: 7, color: c.rimColor, alpha: 1 },
-    ];
-    for (const ring of rings) {
-      traceBeltPath(rim, c, this.cy, ring.inset);
-      rim.stroke({
-        color: ring.color,
-        width: ring.width,
-        alignment: 0.5,
-        alpha: ring.alpha,
-      });
-    }
-    this.layer.addChild(rim);
+    this._shapeBelt(c);
 
     this.beltHeight = beltH;
 
@@ -132,6 +111,27 @@ export class Conveyor {
     }
 
     this.freeBalls = new Set();
+  }
+
+  // Push the grid's vertices out to the outline. Column i spans the belt from
+  // xLeft to xRight; each row is placed as a fraction of that column's height,
+  // so the texture is squeezed or stretched vertically to fit and its rim
+  // lands exactly on the shape.
+  _shapeBelt(c) {
+    const mesh = this.beltMesh;
+    const positions = mesh.geometry.getBuffer("aPosition").data;
+    for (let ix = 0; ix < MESH_COLUMNS; ix++) {
+      const t = ix / (MESH_COLUMNS - 1);
+      const x = c.xLeft + (c.xRight - c.xLeft) * t;
+      const half = beltHalfHeightAt(c, x);
+      for (let iy = 0; iy < MESH_ROWS; iy++) {
+        const v = iy / (MESH_ROWS - 1); // 0 at the top edge, 1 at the bottom
+        const i = (iy * MESH_COLUMNS + ix) * 2;
+        positions[i] = x;
+        positions[i + 1] = this.cy + (v * 2 - 1) * half;
+      }
+    }
+    mesh.geometry.getBuffer("aPosition").update();
   }
 
   pointAtDistance(d) {
