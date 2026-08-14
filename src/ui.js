@@ -189,8 +189,15 @@ export function buildPopup(root, textures, { kind, onCta } = {}) {
   container.addChild(backdrop);
 
   const centerX = DESIGN_W / 2;
-  const centerY =
-    LAYOUT.board.y + (LAYOUT.board.bottomTop - LAYOUT.board.y) / 2;
+  // Centred in the upper board section, which ends where the traced silhouette
+  // starts closing into the funnel. Read from the profile rather than from a
+  // constant: the outline is traced off the reference and re-traceable, and the
+  // constant this used to read (board.bottomTop) went away with the modelled
+  // shape — leaving centerY as NaN, which parked the badge and the button
+  // nowhere at all. The backdrop still faded in, so a lost run dimmed the
+  // screen and showed nothing else.
+  const funnelTop = LAYOUT.board.profile[0][0];
+  const centerY = LAYOUT.board.y + (funnelTop - LAYOUT.board.y) / 2;
 
   let badge;
   if (kind === "fail") {
