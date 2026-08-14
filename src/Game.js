@@ -359,7 +359,17 @@ function updateFreeBalls(world, conveyor, dt) {
 // trickle through the waist, the way the Box2D-driven original behaves.
 function resolveBallCollisions(world, floorY, radius) {
   const balls = [];
-  for (const b of world.freeBalls) if (b.freeFalling) balls.push(b);
+  // Only balls that have cleared the x3 gate take part. A box drops nine at
+  // once from a single point, so before the gate they are on top of each
+  // other by construction and shoving them apart just made the drop look like
+  // a scuffle. Above the bar they pass through one another and the lane pen
+  // keeps them in their own column anyway; below it they behave as solids and
+  // heap on the belt properly. alreadyMultiplied is exactly "past the gate":
+  // set when a ball crosses the bar, and true from birth for the two the
+  // multiplier spawns.
+  for (const b of world.freeBalls) {
+    if (b.freeFalling && b.alreadyMultiplied) balls.push(b);
+  }
   if (balls.length < 2) return;
 
   const minDist = radius * 2;

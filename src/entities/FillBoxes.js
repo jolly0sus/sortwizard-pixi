@@ -209,8 +209,17 @@ class FillColumn {
     // One long-lived mask for the whole column: keeps balls inside the tray
     // stack, lets a filled tray pop upward, and hides the queued trays that
     // would otherwise stick out past the bottom of the board.
+    //
+    // The lower edge is the board's own inner rim, not a count of rows. Tying
+    // it to rowsVisible let the last row finish clear of the frame and sit
+    // there fully drawn, which reads as a stack that simply stops; the
+    // original cuts that row against the woodwork so the column looks like it
+    // continues underneath. FRAME_INNER_INSET is half the widest frame ring
+    // (26px, centred on the board path in Board.js), which is where the gold
+    // stops and the wood begins.
+    const FRAME_INNER_INSET = 13;
     const top = -MASK_HEADROOM;
-    const bottom = (fc.rowsVisible - 1) * fc.rowStep + fc.closedH / 2 + 4;
+    const bottom = LAYOUT.board.bottom - FRAME_INNER_INSET - fc.topY;
     this.mask = new Graphics()
       .roundRect(-fc.tileW / 2 - 4, top, fc.tileW + 8, bottom - top, 16)
       .fill(0xffffff);
