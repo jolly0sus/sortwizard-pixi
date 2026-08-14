@@ -80,7 +80,22 @@ export class ProfileEditor {
         color: 0x00e5ff,
       },
       {
-        id: "belt",
+        id: "beltRim",
+        label: "борт ленты",
+        points: LAYOUT.conveyor.rimShape,
+        place: ([along, half], side) => ({
+          x: along,
+          y: LAYOUT.conveyor.centerY + side * half,
+        }),
+        read: (p) => ({
+          along: p.x,
+          half: Math.abs(p.y - LAYOUT.conveyor.centerY),
+        }),
+        color: 0xff7ae0,
+      },
+      {
+        id: "beltTrack",
+        label: "дорожка внутри",
         points: LAYOUT.conveyor.shape,
         place: ([along, half], side) => ({
           x: along,
@@ -90,8 +105,7 @@ export class ProfileEditor {
           along: p.x,
           half: Math.abs(p.y - LAYOUT.conveyor.centerY),
         }),
-        side: (p) => (p.y >= LAYOUT.conveyor.centerY ? 1 : -1),
-        color: 0xff7ae0,
+        color: 0x9dff6b,
       },
     ];
   }

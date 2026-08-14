@@ -1,4 +1,4 @@
-import { Container, Sprite, MeshPlane } from "pixi.js";
+import { Container, Sprite, MeshPlane, Texture, Rectangle } from "pixi.js";
 import { LAYOUT } from "../config.js";
 import { audio } from "../audio.js";
 
@@ -8,6 +8,9 @@ import { audio } from "../audio.js";
 // with columns spread evenly and only their height read from the table, a
 // point could be dragged sideways all day and the artwork would not move.
 const MESH_ROWS = 6;
+// Height of the purple band at the top and bottom of the source art, so the
+// track mesh can crop it away and not repaint the border over itself.
+const RIM_BAND = 62;
 
 // Stadium-shaped ("racetrack") belt: two straight runs joined by semicircular
 // ends. Only the TOP straight run captures falling balls (the original's
@@ -62,14 +65,38 @@ export class Conveyor {
     //
     // With the default shape — a constant half-height — the grid is flat and
     // the belt renders exactly as the plain sprite did.
-    const base = new MeshPlane({
-      texture: textures.base,
+    // Two models, not one. The border and the track inside it are separate
+    // meshes with separate point tables, so either can be reshaped without
+    // dragging the other along: rimShape is the purple wall, shape is the grey
+    // channel that sits inside it.
+    //
+    // Both use the same artwork. The border mesh shows all of it; the track
+    // mesh shows only the strip between the rim bands, cropped by UV, so the
+    // purple edge is not drawn a second time over itself.
+    const src = textures.base;
+    const inner = new Texture({
+      source: src.source,
+      frame: new Rectangle(
+        0,
+        RIM_BAND,
+        src.width,
+        Math.max(1, src.height - RIM_BAND * 2),
+      ),
+    });
+
+    this.rimMesh = new MeshPlane({
+      texture: src,
+      verticesX: c.rimShape.length,
+      verticesY: MESH_ROWS,
+    });
+    this.bodyMesh = new MeshPlane({
+      texture: inner,
       verticesX: c.shape.length,
       verticesY: MESH_ROWS,
     });
-    this.beltMesh = base;
-    this.layer.addChild(base);
-    this._shapeBelt(c);
+    this.layer.addChild(this.rimMesh, this.bodyMesh);
+    this._shapeMesh(this.rimMesh, c.rimShape);
+    this._shapeMesh(this.bodyMesh, c.shape);
 
     this.beltHeight = beltH;
 
@@ -94,21 +121,17 @@ export class Conveyor {
     this.freeBalls = new Set();
   }
 
-  // Lay the grid over the outline: one column per point, standing at that
-  // point's x and reaching its half-height above and below the centre line.
-  // The texture is spread evenly across the columns, so with the default table
-  // — evenly spaced, constant height — the grid is flat and the belt renders
-  // exactly as the untouched sprite. Move a point and the artwork under it
-  // moves too, rim included, which is the whole purpose.
-  _shapeBelt(c) {
-    const mesh = this.beltMesh;
-    const pts = c.shape;
+  // Lay a grid over one outline: a column per point, standing at that point's
+  // x and reaching its half-height either side of the centre line. The texture
+  // is spread evenly across the columns, so an evenly spaced table of equal
+  // heights leaves the mesh flat and the artwork undistorted.
+  _shapeMesh(mesh, pts) {
     const buffer = mesh.geometry.getBuffer("aPosition");
     const positions = buffer.data;
     for (let ix = 0; ix < pts.length; ix++) {
       const [x, half] = pts[ix];
       for (let iy = 0; iy < MESH_ROWS; iy++) {
-        const v = iy / (MESH_ROWS - 1); // 0 at the top edge, 1 at the bottom
+        const v = iy / (MESH_ROWS - 1);
         const i = (iy * pts.length + ix) * 2;
         positions[i] = x;
         positions[i + 1] = this.cy + (v * 2 - 1) * half;
