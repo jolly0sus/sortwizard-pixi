@@ -130,25 +130,25 @@ export const LAYOUT = {
     // the lower section, which begins as an almost horizontal shelf.
     profile: [
       [800, 361.1],
-      [808, 360.2],
-      [816, 358.4],
-      [824, 355.7],
-      [832, 351.1],
-      [840, 345.7],
-      [848, 337.5],
-      [856, 327.6],
-      [864, 314.9],
-      [872, 299],
-      [880, 280.5],
-      [888, 260.6],
-      [896, 233.4],
-      [904, 200.8],
-      [912, 169.1],
-      [920, 135.1],
-      [928, 94.3],
-      [936, 61.7],
-      [944, 45],
-      [952, 41.5],
+      [808, 359.6],
+      [816, 358.7],
+      [824, 354.4],
+      [828, 352.2],
+      [840, 345.8],
+      [850, 331.9],
+      [859, 317.3],
+      [869, 294],
+      [871, 294.2],
+      [877, 270],
+      [889, 224],
+      [896, 197.5],
+      [906, 159.7],
+      [912, 134.3],
+      [920, 93.1],
+      [928, 67.5],
+      [933, 53.4],
+      [944, 43],
+      [952, 40.8],
       [960, 41],
       [962, 41],
       [964, 41.5],
@@ -170,18 +170,18 @@ export const LAYOUT = {
       [996, 238],
       [998, 266],
       [1000, 286],
-      [1004, 308],
-      [1012, 320],
-      [1020, 328],
-      [1028, 333],
-      [1036, 336],
-      [1044, 338],
-      [1052, 340],
-      [1060, 341],
-      [1068, 342],
-      [1076, 343],
-      [1084, 343],
-      [1092, 343],
+      [1001, 298.8],
+      [1010, 323.6],
+      [1020, 331.8],
+      [1028, 336.4],
+      [1036, 338.4],
+      [1044, 340.6],
+      [1052, 340.9],
+      [1060, 342.4],
+      [1068, 342.5],
+      [1076, 343.1],
+      [1084, 342.9],
+      [1092, 342.7],
       [1100, 343.4],
     ],
     // Where the ball funnel ends and the belt's capture span takes over.
@@ -233,10 +233,10 @@ export const LAYOUT = {
   // way the original's does — slots and the balls riding them sit *inside*
   // the walls, never straddling them.
   conveyor: {
-    centerY: 1070,
-    xLeft: 30,
-    xRight: 720,
-    beltH: 124,
+    centerY: 1068,
+    xLeft: 54,
+    xRight: 698,
+    beltH: 104,
     // How far the path's rounded ends are held back from the belt's own ends.
     // The capsule is pinched to nothing at its extreme x, so a slot placed
     // there would poke straight out of the artwork.
@@ -250,7 +250,7 @@ export const LAYOUT = {
     // Defaults trace a plain capsule of radius beltH/2.
     // How much of each rounded end the nine-slice keeps at its own scale;
     // only the strip between the caps is stretched to length.
-    capWidth: 420,
+    capWidth: 1582,
     // The drop shadow that lifts the belt off the board.
     shadowScale: 1.02,
     shadowDrop: 12,
@@ -285,12 +285,12 @@ export const LAYOUT = {
   // is set so the outermost wells (±40) sit ~15px inside the belt's straight
   // run — see conveyor.pathInset above.
   fillColumns: {
-    xs: [153, 301, 449, 597],
+    xs: [155, 303, 451, 599],
     tileW: 138,
     closedH: 62,
     openH: 78,
-    rowStep: 66,
-    topY: 1193,
+    rowStep: 73,
+    topY: 1172,
     rowsVisible: 4,
     // Only the top tray of a column takes balls — the original's rule. It
     // holds exactly one tap, which is why the tap is 3 balls: the two have to
