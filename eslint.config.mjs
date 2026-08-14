@@ -20,6 +20,7 @@ export default [
         clearTimeout: "readonly",
         FontFace: "readonly",
         Audio: "readonly",
+        fetch: "readonly",
         localStorage: "readonly",
         navigator: "readonly",
         matchMedia: "readonly",
