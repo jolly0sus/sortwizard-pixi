@@ -161,7 +161,11 @@ export const LAYOUT = {
 
   // Plain-wood patch cut out of TanBackingRender, stretched over the board to
   // give it the original's vertical grain.
-  woodPatch: { x: 300, y: 3300, w: 1700, h: 450 },
+  // TanBackingRender used to be a 2287x3822 sheet and this was the strip of
+  // grain cut out of it at (300, 3300). scripts/optimize-assets.mjs crops the
+  // file down to exactly that strip -- 6.4 MB to 139 KB -- so the origin is
+  // now 0,0. The script refuses to run if these two ever drift apart.
+  woodPatch: { x: 0, y: 0, w: 1700, h: 450 },
 
   // The slot path has to stay clear of the belt's rim on all four sides, the
   // way the original's does — slots and the balls riding them sit *inside*
@@ -230,8 +234,15 @@ export const LAYOUT = {
   cta: { x: 352, y: 1470, w: 378, h: 74 },
 };
 
-export const IMG = (name) => `/assets/images/${name}`;
-export const AUD = (name) => `/assets/audio/${name}`;
+// Asset paths go through here so the single-file build can serve them from
+// memory. `npm run build:single` bakes every asset into the HTML as a data
+// URI and leaves the lookup table on window.__SW_ASSETS; with no table
+// present — dev server, normal build — the plain path is returned unchanged.
+const asset = (path) => globalThis.__SW_ASSETS?.[path] ?? path;
+
+export const IMG = (name) => asset(`/assets/images/${name}`);
+export const AUD = (name) => asset(`/assets/audio/${name}`);
+export const FONT = (name) => asset(`/assets/fonts/${name}`);
 
 export const BALL_TEXTURES = {
   [COLORS.PINK]: IMG("ball_pink.png"),

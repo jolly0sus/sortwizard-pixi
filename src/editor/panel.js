@@ -61,12 +61,14 @@ export function mountEditor(game) {
   // build: no hint in the corner, no stray keypress opening a debug panel over
   // someone's game. Locally it behaves as before, and ?edit brings it back
   // anywhere.
+  // Note there is no file:// case here on purpose. An empty hostname means the
+  // page was opened straight off disk, which is exactly what the packed
+  // single-file build is — the artefact that ships. ?edit still works there.
   const host = location.hostname;
   const editorOffered =
     new URLSearchParams(location.search).has("edit") ||
     host === "localhost" ||
-    host === "127.0.0.1" ||
-    host === "";
+    host === "127.0.0.1";
 
   const style = document.createElement("style");
   style.textContent = CSS;

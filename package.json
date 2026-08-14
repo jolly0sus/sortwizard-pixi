@@ -7,7 +7,9 @@
     "start": "npm run dev",
     "build": "npm run lint && vite build",
     "lint": "eslint .",
-    "dev": "vite"
+    "dev": "vite",
+    "build:single": "node scripts/build-single.mjs",
+    "assets:optimize": "node scripts/optimize-assets.mjs"
   },
   "dependencies": {
     "pixi.js": "^8.8.1"
@@ -18,6 +20,7 @@
     "eslint-config-prettier": "^10.1.2",
     "eslint-plugin-prettier": "^5.2.6",
     "prettier": "^3.5.3",
+    "sharp": "^0.35.3",
     "vite": "^6.2.0"
   }
 }

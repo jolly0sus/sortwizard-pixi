@@ -14,6 +14,7 @@ import {
   BALL_DIAMETER,
   LAYOUT,
   ECONOMY,
+  FONT,
 } from "./config.js";
 import { buildBoard, ballHalfWidthAt, boardCx } from "./entities/Board.js";
 import { Conveyor } from "./entities/Conveyor.js";
@@ -380,7 +381,7 @@ async function loadFont() {
   try {
     const font = new FontFace(
       "Azeret Mono",
-      "url(/assets/fonts/AzeretMono-Black.ttf)",
+      `url(${FONT("AzeretMono-Black.ttf")})`,
       { weight: "900" },
     );
     await font.load();

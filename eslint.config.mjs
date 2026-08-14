@@ -32,4 +32,18 @@ export default [
     },
     rules: {},
   },
+  // Build tooling runs in Node, not the browser.
+  {
+    files: ["scripts/**/*.mjs", "vite.config.js"],
+    languageOptions: {
+      ecmaVersion: "latest",
+      sourceType: "module",
+      globals: {
+        console: "readonly",
+        process: "readonly",
+        URL: "readonly",
+        Buffer: "readonly",
+      },
+    },
+  },
 ];
