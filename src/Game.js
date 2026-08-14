@@ -85,6 +85,14 @@ const JAM_FAIL_SECONDS = 1.5 * LAYOUT.conveyor.loopSeconds;
 const isCoarsePointer =
   typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
 const MAX_MOBILE_RESOLUTION = 2;
+// The desktop used to render at resolution 1 regardless of the screen, on the
+// assumption that only phones have dense ones. A Windows laptop at 150% scale
+// or any retina display reports devicePixelRatio 2, so the whole canvas was
+// drawn at half the pixels the screen has and the browser blew it back up —
+// every sprite soft, no matter how much detail the file carried. The same cap
+// as the phones: past 2 the extra pixels are not visible and the fill cost is
+// quadratic.
+const MAX_DESKTOP_RESOLUTION = 2;
 
 export async function createGame(containerEl) {
   const app = new Application();
@@ -93,10 +101,13 @@ export async function createGame(containerEl) {
     resizeTo: window,
     antialias: !isCoarsePointer,
     preference: "webgl",
-    resolution: isCoarsePointer
-      ? Math.min(globalThis.devicePixelRatio || 1, MAX_MOBILE_RESOLUTION)
-      : 1,
-    autoDensity: isCoarsePointer,
+    resolution: Math.min(
+      globalThis.devicePixelRatio || 1,
+      isCoarsePointer ? MAX_MOBILE_RESOLUTION : MAX_DESKTOP_RESOLUTION,
+    ),
+    // Must travel with any resolution other than 1, or the canvas keeps its
+    // backing-store size in CSS pixels and comes out twice too big.
+    autoDensity: true,
   });
   containerEl.appendChild(app.canvas);
 
@@ -614,10 +625,28 @@ async function loadTextures() {
     t.trayMarbles[c] = loaded[entries[`trayMarbles_${c}`]];
     t.trayInactive[c] = loaded[entries[`trayInactive_${c}`]];
   }
-  // Big art shown small needs mip levels, or minification aliases badly.
-  for (const tex of [t.gloveHover, t.gloveClick1, t.gloveClick2, t.logo]) {
-    tex.source.autoGenerateMipmaps = true;
-    tex.source.update();
+  // Big art shown small needs mip levels, or minification aliases badly — and
+  // that is *everything* here, not just the glove and the logo this loop used
+  // to cover. The board is letterboxed into whatever window it gets, so on a
+  // desktop the whole scene lands at about half design size: a ball is 143px
+  // of texture inside 25 on screen. Point-sampling one texel in six is what
+  // made the art look crunchy rather than soft.
+  //
+  // The lightning is the one exception. Its four bolts share a single sheet,
+  // and the lower mips would average them into each other.
+  const sheetSources = new Set(t.lightning.map((tex) => tex.source));
+  const sources = new Set();
+  const collect = (v) => {
+    if (!v) return;
+    if (Array.isArray(v)) v.forEach(collect);
+    else if (v instanceof Texture) sources.add(v.source);
+    else if (typeof v === "object") Object.values(v).forEach(collect);
+  };
+  collect(t);
+  for (const source of sources) {
+    if (sheetSources.has(source)) continue;
+    source.autoGenerateMipmaps = true;
+    source.update();
   }
 
   return t;

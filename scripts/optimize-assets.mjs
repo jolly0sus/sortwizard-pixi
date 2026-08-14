@@ -34,13 +34,17 @@ const images = join(root, "public", "assets", "images");
 const PATCH = { left: 300, top: 3300, width: 1700, height: 450 };
 
 // Longest edge each sprite is allowed to keep. Absent = leave the size alone.
+//
+// The result badge is deliberately not here. It is drawn at 420 design px —
+// the largest single thing on screen — so on a tall window at devicePixelRatio
+// 2 it wants ~840 real pixels, and the 512 cap this used to carry left it the
+// one visibly soft sprite in the game. Its native 802 is the honest size for
+// it. Win_Button is not loaded by anything, so capping it saved nothing.
 const CAPS = {
   "Pointing_glove_hover.png": 512,
   "Pointing_glove_Click_1.png": 512,
   "Pointing_glove_Click_2.png": 512,
   "Logo_SW.png": 640,
-  "Fail_Button.png": 512,
-  "Win_Button.png": 512,
 };
 
 const kb = (n) => `${(n / 1024).toFixed(0)} KB`;
