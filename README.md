@@ -3,9 +3,10 @@
 A PixiJS v8 rebuild of the "Sort Wizard" playable ad, reproduced from the
 original at `playbox.play.plbx.ai/sortwizard/c1`.
 
-> **Assets.** The artwork and audio under `public/assets/` come from the
-> original playable and are not mine to license. Keep this repository private
-> unless you have the rights to redistribute them.
+> **Assets.** The artwork, audio and fonts under `public/assets/` are taken
+> from the original playable and belong to its authors. They are included here
+> only so the reconstruction runs; no licence to them is granted by this
+> repository. The code is mine, the art is not.
 
 ## Running it
 
