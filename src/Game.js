@@ -176,7 +176,18 @@ function buildScene(app, textures) {
   // a tray of its colour opens. That means the economy has to be closed --
   // every ball dealt has a slot waiting somewhere -- because a surplus ball
   // occupies a slot forever and the loop deadlocks. See config.js ECONOMY.
-  const conveyor = new Conveyor(conveyorLayer, textures);
+  const conveyor = new Conveyor(conveyorLayer, textures, {
+    onBallLost(ball) {
+      // Let go rather than deleted: it drops out of the slot, falls past the
+      // board and is only recycled once it is off the screen.
+      ball.discarded = true;
+      ball.freeFalling = true;
+      ball.vx = (Math.random() - 0.5) * 40;
+      ball.vy = 60;
+      world.freeBalls.add(ball);
+      conveyor.registerFreeBall(ball);
+    },
+  });
   world.conveyor = conveyor;
 
   const fillBoxManager = new FillBoxManager(world);
@@ -310,6 +321,16 @@ function updateFreeBalls(world, conveyor, dt) {
     ball.x += ball.vx * dt;
     ball.y += ball.vy * dt;
     ball.rotation += ball.vx * dt * 0.01;
+
+    // A discarded ball is on its way out: no walls, no floor, no belt.
+    if (ball.discarded) {
+      if (ball.y > DESIGN_H + 60) {
+        world.freeBalls.delete(ball);
+        conveyor.freeBalls.delete(ball);
+        Ball.despawn(ball);
+      }
+      continue;
+    }
 
     // ride the hourglass walls so balls funnel down through the waist
     const half = Math.max(radius, ballHalfWidthAt(ball.y) - radius);

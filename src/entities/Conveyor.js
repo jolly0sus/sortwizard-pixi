@@ -69,16 +69,40 @@ export class Conveyor {
     this.cellLayer = new Container();
     this.layer.addChild(this.cellLayer);
 
+    // Each slot is three copies of the same art rather than one: a dark one
+    // spread a little wider and dropped a couple of pixels, the face itself,
+    // and a pale one pulled in and lifted. Read together that is a lip
+    // catching the light at the top and shade pooling at the bottom, which is
+    // what makes the slot look pressed into the belt instead of printed on it.
     for (let i = 0; i < this.cellCount; i++) {
-      const spr = new Sprite(
-        i % 6 < 3 ? textures.cellDark : textures.cellLight,
-      );
-      spr.anchor.set(0.5);
-      spr.width = c.cellW;
-      spr.height = c.cellH;
-      this.cellLayer.addChild(spr);
+      const tex = i % 6 < 3 ? textures.cellDark : textures.cellLight;
+      const holder = new Container();
+
+      const shade = new Sprite(tex);
+      shade.anchor.set(0.5);
+      shade.width = c.cellW * 1.16;
+      shade.height = c.cellH * 1.14;
+      shade.tint = 0x160f2e;
+      shade.alpha = 0.5;
+      shade.y = c.cellH * 0.09;
+
+      const face = new Sprite(tex);
+      face.anchor.set(0.5);
+      face.width = c.cellW;
+      face.height = c.cellH;
+
+      const gloss = new Sprite(tex);
+      gloss.anchor.set(0.5);
+      gloss.width = c.cellW * 0.74;
+      gloss.height = c.cellH * 0.64;
+      gloss.tint = 0xffffff;
+      gloss.alpha = 0.22;
+      gloss.y = -c.cellH * 0.14;
+
+      holder.addChild(shade, face, gloss);
+      this.cellLayer.addChild(holder);
       this.cells.push({
-        sprite: spr,
+        sprite: holder,
         baseDist: (i * this.totalLen) / this.cellCount,
         ball: null,
       });

@@ -44,7 +44,17 @@ export function boardHalfWidthAt(y) {
 // past the last slot and sit there forever.
 export function ballHalfWidthAt(y) {
   const h = boardHalfWidthAt(y);
-  if (y < LAYOUT.board.waistBottom) return h;
+  const b = LAYOUT.board;
+  if (y < b.waistBottom) return h;
+
+  // Below the throat the board itself flares straight back out, and letting a
+  // ball follow that let it drift sideways the moment it was through — which
+  // is how they ended up heaped against the right-hand end of the belt rather
+  // than dropping onto it. The walls stay as narrow as the throat all the way
+  // down to the belt, so what the funnel gathers arrives where the slots are.
+  const beltTop = LAYOUT.conveyor.centerY - LAYOUT.conveyor.beltH / 2;
+  if (y < beltTop) return Math.min(h, boardHalfWidthAt(b.waistBottom));
+
   return Math.min(h, captureHalfWidth());
 }
 
