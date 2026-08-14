@@ -190,6 +190,7 @@ export function editableObjects() {
         "conveyor.pathRadius",
         "conveyor.pathRadiusY",
         // the purple belt's own shape and shadow
+        "conveyor.capWidth",
         "conveyor.shadowScale",
         "conveyor.shadowDrop",
         "conveyor.shadowAlpha",

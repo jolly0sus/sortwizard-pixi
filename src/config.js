@@ -248,53 +248,9 @@ export const LAYOUT = {
     // artwork is masked to this shape and the rim drawn along it, so the ends
     // can be reshaped point by point in the editor rather than only stretched.
     // Defaults trace a plain capsule of radius beltH/2.
-    // Two outlines, edited separately. rimShape is the purple border; shape is
-    // the grey track inside it, which sits lower so the border reads as a wall
-    // around it. Both are half-heights along the belt, mirrored about centerY.
-    rimShape: [
-      [30, 62],
-      [44, 62],
-      [58, 62],
-      [72, 62],
-      [86, 62],
-      [100, 62],
-      [130, 62],
-      [180, 62],
-      [250, 62],
-      [330, 62],
-      [410, 62],
-      [490, 62],
-      [570, 62],
-      [620, 62],
-      [650, 62],
-      [664, 62],
-      [678, 62],
-      [692, 62],
-      [706, 62],
-      [720, 62],
-    ],
-    shape: [
-      [30, 47],
-      [44, 47],
-      [58, 47],
-      [72, 47],
-      [86, 47],
-      [100, 47],
-      [130, 47],
-      [180, 47],
-      [250, 47],
-      [330, 47],
-      [410, 47],
-      [490, 47],
-      [570, 47],
-      [620, 47],
-      [650, 47],
-      [664, 47],
-      [678, 47],
-      [692, 47],
-      [706, 47],
-      [720, 47],
-    ],
+    // How much of each rounded end the nine-slice keeps at its own scale;
+    // only the strip between the caps is stretched to length.
+    capWidth: 420,
     // The drop shadow that lifts the belt off the board.
     shadowScale: 1.02,
     shadowDrop: 12,

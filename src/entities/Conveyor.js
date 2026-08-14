@@ -1,16 +1,6 @@
-import { Container, Sprite, MeshPlane, Texture, Rectangle } from "pixi.js";
+import { Container, Sprite, NineSliceSprite } from "pixi.js";
 import { LAYOUT } from "../config.js";
 import { audio } from "../audio.js";
-
-// Rows in the grid the belt texture is drawn on. Its COLUMNS are not a fixed
-// count: there is one per point of LAYOUT.conveyor.shape, standing exactly
-// where that point puts it. That is what makes the rounded ends editable —
-// with columns spread evenly and only their height read from the table, a
-// point could be dragged sideways all day and the artwork would not move.
-const MESH_ROWS = 6;
-// Height of the purple band at the top and bottom of the source art, so the
-// track mesh can crop it away and not repaint the border over itself.
-const RIM_BAND = 62;
 
 // Stadium-shaped ("racetrack") belt: two straight runs joined by semicircular
 // ends. Only the TOP straight run captures falling balls (the original's
@@ -57,47 +47,23 @@ export class Conveyor {
     shade.alpha = c.shadowAlpha;
     this.layer.addChild(shade);
 
-    // The belt is the original artwork, laid over a grid whose vertices take
-    // their height from LAYOUT.conveyor.shape. Nothing new is drawn on top:
-    // the purple rim you see is the one in the texture, and bending the grid
-    // bends that rim with it, which is what makes the existing outline
-    // editable rather than replaced.
-    //
-    // With the default shape — a constant half-height — the grid is flat and
-    // the belt renders exactly as the plain sprite did.
-    // Two models, not one. The border and the track inside it are separate
-    // meshes with separate point tables, so either can be reshaped without
-    // dragging the other along: rimShape is the purple wall, shape is the grey
-    // channel that sits inside it.
-    //
-    // Both use the same artwork. The border mesh shows all of it; the track
-    // mesh shows only the strip between the rim bands, cropped by UV, so the
-    // purple edge is not drawn a second time over itself.
-    const src = textures.base;
-    const inner = new Texture({
-      source: src.source,
-      frame: new Rectangle(
-        0,
-        RIM_BAND,
-        src.width,
-        Math.max(1, src.height - RIM_BAND * 2),
-      ),
+    // capWidth is how much of the source art each rounded end keeps at its own
+    // scale; only the strip between the two caps is stretched to length. Raise
+    // it for longer, blunter ends, lower it for tighter ones. Too high and the
+    // caps overlap, so it is held to just under half the belt.
+    const cap = Math.min(c.capWidth, textures.base.width / 2 - 1);
+    const base = new NineSliceSprite({
+      texture: textures.base,
+      leftWidth: cap,
+      rightWidth: cap,
+      topHeight: 0,
+      bottomHeight: 0,
     });
-
-    this.rimMesh = new MeshPlane({
-      texture: src,
-      verticesX: c.rimShape.length,
-      verticesY: MESH_ROWS,
-    });
-    this.bodyMesh = new MeshPlane({
-      texture: inner,
-      verticesX: c.shape.length,
-      verticesY: MESH_ROWS,
-    });
-    this.layer.addChild(this.rimMesh, this.bodyMesh);
-    this._shapeMesh(this.rimMesh, c.rimShape);
-    this._shapeMesh(this.bodyMesh, c.shape);
-
+    base.width = beltW;
+    base.height = beltH;
+    base.x = c.xLeft;
+    base.y = this.cy - beltH / 2;
+    this.layer.addChild(base);
     this.beltHeight = beltH;
 
     this.cellLayer = new Container();
@@ -119,25 +85,6 @@ export class Conveyor {
     }
 
     this.freeBalls = new Set();
-  }
-
-  // Lay a grid over one outline: a column per point, standing at that point's
-  // x and reaching its half-height either side of the centre line. The texture
-  // is spread evenly across the columns, so an evenly spaced table of equal
-  // heights leaves the mesh flat and the artwork undistorted.
-  _shapeMesh(mesh, pts) {
-    const buffer = mesh.geometry.getBuffer("aPosition");
-    const positions = buffer.data;
-    for (let ix = 0; ix < pts.length; ix++) {
-      const [x, half] = pts[ix];
-      for (let iy = 0; iy < MESH_ROWS; iy++) {
-        const v = iy / (MESH_ROWS - 1);
-        const i = (iy * pts.length + ix) * 2;
-        positions[i] = x;
-        positions[i + 1] = this.cy + (v * 2 - 1) * half;
-      }
-    }
-    buffer.update();
   }
 
   pointAtDistance(d) {
