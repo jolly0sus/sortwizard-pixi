@@ -52,8 +52,21 @@ function numericPaths(obj, prefix) {
 }
 
 export function mountEditor(game) {
-  // handle for poking at live state from the console / test scripts
+  // handle for poking at live state from the console / test scripts. Always
+  // set, including in production — it is invisible and the headless tests
+  // drive the game through it.
   window.__sw = game;
+
+  // The editor is a development tool, so it stays out of sight on a deployed
+  // build: no hint in the corner, no stray keypress opening a debug panel over
+  // someone's game. Locally it behaves as before, and ?edit brings it back
+  // anywhere.
+  const host = location.hostname;
+  const editorOffered =
+    new URLSearchParams(location.search).has("edit") ||
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "";
 
   const style = document.createElement("style");
   style.textContent = CSS;
@@ -63,6 +76,7 @@ export function mountEditor(game) {
   tip.className = "sw-ed-tip";
   const idleTip = "E — редактор сцены";
   tip.textContent = idleTip;
+  tip.hidden = !editorOffered;
   document.body.appendChild(tip);
 
   let panel = null;
@@ -301,10 +315,12 @@ export function mountEditor(game) {
     }
   }
 
-  window.addEventListener("keydown", (e) => {
-    if (e.target instanceof HTMLInputElement) return;
-    if ("eEуУ".includes(e.key)) toggle();
-  });
+  if (editorOffered) {
+    window.addEventListener("keydown", (e) => {
+      if (e.target instanceof HTMLInputElement) return;
+      if ("eEуУ".includes(e.key)) toggle();
+    });
+  }
 
   if (new URLSearchParams(location.search).has("edit")) toggle();
 
