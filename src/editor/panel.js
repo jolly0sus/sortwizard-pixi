@@ -1,6 +1,7 @@
 import { LAYOUT } from "../config.js";
 import { layoutStore } from "./overrides.js";
 import { SelectionOverlay } from "./overlay.js";
+import { ProfileEditor } from "./profile.js";
 
 const CSS = `
 .sw-ed{position:fixed;top:0;right:0;width:320px;max-height:100vh;overflow:auto;
@@ -103,6 +104,19 @@ export function mountEditor(game) {
     onSelect: () => refresh(),
   });
 
+  // The board's silhouette has no rectangle to drag — it is a table of
+  // half-widths — so it gets its own handle-based editor, off by default so
+  // its dots do not clutter the ordinary object editing.
+  const profileEditor = new ProfileEditor(game.app, game, {
+    onChange: () => {
+      refresh();
+      scheduleRebuild();
+    },
+  });
+  // exposed like window.__sw, so the contour can be driven from the console
+  // or a test without going through synthetic mouse coordinates
+  window.__swProfile = profileEditor;
+
   function field(path) {
     const row = document.createElement("div");
     row.className = "row";
@@ -194,6 +208,15 @@ export function mountEditor(game) {
       host.appendChild(b);
       return b;
     };
+
+    const contourBtn = mkBtn("Контур доски", "", () => {
+      toggleProfile();
+      contourBtn.classList.toggle("on", profileEditor.enabled);
+    });
+    contourBtn.classList.toggle("on", profileEditor.enabled);
+    contourBtn.title =
+      "Точки силуэта: тяните мышью, стрелки — по 1 (с Shift по 5), " +
+      "+ добавить точку, Delete убрать. Клавиша C.";
 
     mkBtn("Сохранить", "pri", () => {
       layoutStore.save();
@@ -309,6 +332,7 @@ export function mountEditor(game) {
       panel = null;
       refresh = () => {};
       overlay.setEnabled(false);
+      profileEditor.setEnabled(false);
       tip.style.display = "";
     } else {
       build();
@@ -317,10 +341,23 @@ export function mountEditor(game) {
     }
   }
 
+  // Contour mode swaps the rectangle handles for the outline's own points.
+  function toggleProfile() {
+    const on = !profileEditor.enabled;
+    profileEditor.setEnabled(on);
+    overlay.setEnabled(!on);
+    if (on) overlay.select(null);
+    flash(on ? "контур: тяните точки, +/- добавить/убрать" : "объекты");
+    refresh();
+  }
+
   if (editorOffered) {
     window.addEventListener("keydown", (e) => {
       if (e.target instanceof HTMLInputElement) return;
       if ("eEуУ".includes(e.key)) toggle();
+      // contour mode, but only while the panel is open — otherwise a stray C
+      // would drop handles onto a scene with no editor showing
+      else if (panel && "cCсС".includes(e.key)) toggleProfile();
     });
   }
 
