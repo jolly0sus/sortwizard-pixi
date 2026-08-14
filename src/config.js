@@ -115,15 +115,24 @@ export const LAYOUT = {
     x: 3,
     y: 112,
     w: 744,
+    // Silhouette measured off the original playable rather than eyeballed --
+    // see scripts/waist-profile.mjs, which reads the wooden neck width per row
+    // out of two screenshots and prints them side by side.
+    //
     // where the wide top section starts curving in toward the waist
     bottomTop: 812,
-    // how sharply it closes; >1 keeps it wide longer, matching the reference
-    waistExponent: 1.4,
-    // narrowest point of the hourglass
-    waistBottom: 975,
-    waistWidth: 146,
-    // the separate lower (conveyor + trays) section
-    lowerTop: 1025,
+    // How sharply it closes. Fitting pow(t, e) to the reference gives e ~= 2.0
+    // across the whole taper; at 1.4 the board stayed far too wide through the
+    // middle -- 465 against the original's 273 at y=920.
+    waistExponent: 2.0,
+    // Where the taper bottoms out. The original is down to its narrowest by
+    // y=940 and holds it from there.
+    waistBottom: 928,
+    // Narrowest point of the hourglass, measured at 111.
+    waistWidth: 72,
+    // Where the separate lower (conveyor + trays) section begins, and with it
+    // the end of the parallel throat above.
+    lowerTop: 984,
     lowerX: 20,
     lowerW: 710,
     bottom: 1416,
@@ -183,14 +192,15 @@ export const LAYOUT = {
     pathInset: 50,
     // Horizontal radius of the loop's turns.
     pathRadius: 14,
-    // Vertical half-distance between the two slot rows. A ball centred on a
-    // row spans ry +/- 23, which has to clear the rim's inner edge (~48), so
-    // the two rows end up just touching — the same fit as the original.
-    pathRadiusY: 24,
-    // Slot size. On the turns the slot is rotated, so its half-length adds to
-    // pathRadiusY; keep the sum clear of the rim's inner edge (~47.7).
-    cellW: 22,
-    cellH: 26,
+    // Vertical half-distance between the two slot rows. The original sets its
+    // rows 56 apart, measured centre to centre.
+    pathRadiusY: 28,
+    // Slot size, measured off the original at 26 x 34 -- ours were 22 x 26,
+    // noticeably small and slightly squat against the 89x110 source art.
+    // On the turns the slot is rotated, so half its length adds to
+    // pathRadiusY; 28 + 17 = 45 still clears the rim's inner edge (~47.7).
+    cellW: 26,
+    cellH: 34,
     // Exactly one tap's worth: 9 balls x3 = 27. One tap fills the loop, and a
     // tap on the wrong colour fills it with balls no tray will ever take --
     // which is precisely how a wrong move loses.
