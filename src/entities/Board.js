@@ -21,55 +21,29 @@ const captureHalfWidth = () => (captureRightX() - captureLeftX()) / 2;
 // drawn, and the wall balls slide along on their way down.
 export function boardHalfWidthAt(y) {
   const b = LAYOUT.board;
-  const topHalf = b.w / 2;
-  const waistHalf = b.waistWidth / 2;
-  const lowerHalf = b.lowerW / 2;
-  if (y <= b.bottomTop) return topHalf;
-  if (y <= b.waistBottom) {
-    const t = (y - b.bottomTop) / (b.waistBottom - b.bottomTop);
-    return topHalf + (waistHalf - topHalf) * Math.pow(t, b.waistExponent);
+  const p = b.profile;
+  // Above the traced range the board is its full width; below it, the lower
+  // section's. In between, walk the table and interpolate.
+  if (y <= p[0][0]) return b.w / 2;
+  const last = p[p.length - 1];
+  if (y >= last[0]) return last[1];
+  let lo = 0;
+  let hi = p.length - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (p[mid][0] <= y) lo = mid;
+    else hi = mid;
   }
-  // Parallel throat. Measured off the original: the neck holds a constant
-  // 111px from y=940 down to where the lower section takes over, rather than
-  // flaring open the moment the taper ends. Without this stretch the walls
-  // read as one continuous funnel instead of two shapes meeting at a gap.
-  if (y <= b.lowerTop) return waistHalf;
-  return lowerHalf;
-}
-
-// The silhouette is walked as short line segments, so every place the profile
-// changes slope — the shoulder, the throat, where the neck meets the lower
-// section — came out as a hard crease. The original's walls are rounded there:
-// each wing ends in a fat curve, not a notch.
-//
-// Two passes of a moving average fix all of them at once: one pass turns a
-// corner into a straight chamfer, the second rounds that chamfer into an arc.
-// Flat stretches average to themselves, so the board's straight sides are
-// untouched. The radius is a balance — the throat is only ~56px long, and a
-// window wider than half of it eats into the parallel section and lets the
-// neck bulge open. waistWidth is set against this: it is measured at 72 here
-// and draws at ~99, because the smoothing opens it up by roughly the radius.
-const CORNER_ROUND = 16;
-
-function roundedHalfWidthAt(y) {
-  const span = CORNER_ROUND / 2;
-  const pass = (yy) => {
-    let sum = 0;
-    for (let k = -2; k <= 2; k++) sum += boardHalfWidthAt(yy + (k * span) / 2);
-    return sum / 5;
-  };
-  let sum = 0;
-  for (let k = -2; k <= 2; k++) sum += pass(y + (k * span) / 2);
-  return sum / 5;
+  const [y0, h0] = p[lo];
+  const [y1, h1] = p[hi];
+  return h0 + ((h1 - h0) * (y - y0)) / (y1 - y0);
 }
 
 // Where a *ball* may travel. Same as the board above the throat, but below it
 // the walls close in to the belt's capture span so a ball can never settle
 // past the last slot and sit there forever.
 export function ballHalfWidthAt(y) {
-  // The rounded profile, not the raw one, so a ball rides the wall that is
-  // actually drawn — otherwise it clips the corner at the throat.
-  const h = roundedHalfWidthAt(y);
+  const h = boardHalfWidthAt(y);
   if (y < LAYOUT.board.waistBottom) return h;
   return Math.min(h, captureHalfWidth());
 }
@@ -80,10 +54,12 @@ function traceBoardPath(g, inset = 0) {
   const b = LAYOUT.board;
   const cx = boardCx();
   const r = Math.max(8, b.radius - inset);
-  const step = 6;
+  // Fine enough to reproduce the traced profile, whose sharpest feature — the
+  // lower section's top edge — turns over in two design units.
+  const step = 2;
   const top = b.y + inset;
   const bottom = b.bottom - inset;
-  const half = (y) => Math.max(10, roundedHalfWidthAt(y) - inset);
+  const half = (y) => Math.max(10, boardHalfWidthAt(y) - inset);
   const topHalf = half(top);
   const botHalf = half(bottom);
 

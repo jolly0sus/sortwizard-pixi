@@ -19,6 +19,7 @@
     "eslint": "^9.21.0",
     "eslint-config-prettier": "^10.1.2",
     "eslint-plugin-prettier": "^5.2.6",
+    "playwright": "^1.62.1",
     "prettier": "^3.5.3",
     "sharp": "^0.35.3",
     "vite": "^6.2.0"

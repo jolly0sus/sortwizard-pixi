@@ -112,29 +112,82 @@ export const LAYOUT = {
   // Traced from the original: the funnel already starts closing at y≈812 and
   // reaches its 146px-wide throat at y≈975.
   board: {
-    x: 3,
+    x: 13.5,
     y: 112,
-    w: 744,
-    // Silhouette measured off the original playable rather than eyeballed --
-    // see scripts/waist-profile.mjs, which reads the wooden neck width per row
-    // out of two screenshots and prints them side by side.
+    w: 723,
+    // The silhouette is TRACED off the reference playable, not modelled.
+    // scripts/trace-edge.mjs walks a screenshot row by row, finds where the
+    // purple background stops, subtracts the frame's half-width and prints
+    // this table in design units.
     //
-    // where the wide top section starts curving in toward the waist
-    bottomTop: 812,
-    // How sharply it closes. Fitting pow(t, e) to the reference gives e ~= 2.0
-    // across the whole taper; at 1.4 the board stayed far too wide through the
-    // middle -- 465 against the original's 273 at y=920.
-    waistExponent: 2.0,
-    // Where the taper bottoms out. The original is down to its narrowest by
-    // y=940 and holds it from there.
-    waistBottom: 928,
-    // Narrowest point of the hourglass, measured at 111.
-    waistWidth: 72,
-    // Where the separate lower (conveyor + trays) section begins, and with it
-    // the end of the parallel throat above.
-    lowerTop: 984,
-    lowerX: 20,
-    lowerW: 710,
+    // Every parametric attempt before this got close and stayed wrong, because
+    // the real curve is not the shape the formula could make: there is no
+    // parallel throat, for one -- the neck eases through a rounded minimum of
+    // 41.3 at y=956 and opens again. Interpolating the measurements is exact
+    // by construction, and re-tracing a new screenshot regenerates it.
+    //
+    // The near-vertical step at 974 -> 976 is real: that is the top edge of
+    // the lower section, which begins as an almost horizontal shelf.
+    profile: [
+      [800, 361.1],
+      [808, 359.6],
+      [816, 358.7],
+      [824, 354.4],
+      [832, 345],
+      [840, 345.8],
+      [848, 330.9],
+      [856, 310.1],
+      [864, 230.7],
+      [872, 282.5],
+      [880, 276.9],
+      [888, 148.7],
+      [896, 197.5],
+      [904, 197.7],
+      [912, 134.3],
+      [920, 93.1],
+      [928, 67.5],
+      [936, 37],
+      [944, 43],
+      [952, 40.8],
+      [960, 41],
+      [962, 41],
+      [964, 41.5],
+      [966, 42],
+      [968, 42.5],
+      [970, 43],
+      [972, 44],
+      [974, 45],
+      [976, 46],
+      [978, 48],
+      [980, 50],
+      [982, 53],
+      [984, 57],
+      [986, 63],
+      [988, 78],
+      [990, 112],
+      [992, 158],
+      [994, 203],
+      [996, 238],
+      [998, 266],
+      [1000, 286],
+      [1004, 308],
+      [1012, 329.7],
+      [1020, 331.8],
+      [1028, 336.4],
+      [1036, 338.4],
+      [1044, 340.6],
+      [1052, 340.9],
+      [1060, 342.4],
+      [1068, 342.5],
+      [1076, 343.1],
+      [1084, 342.9],
+      [1092, 342.7],
+      [1100, 343.4],
+    ],
+    // Where the ball funnel ends and the belt's capture span takes over.
+    waistBottom: 956,
+    lowerX: 32,
+    lowerW: 686,
     bottom: 1416,
     radius: 44,
   },
