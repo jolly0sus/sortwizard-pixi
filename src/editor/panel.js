@@ -127,7 +127,12 @@ export function mountEditor(game) {
 
     const input = document.createElement("input");
     input.type = "number";
-    input.step = "1";
+    // Most of LAYOUT is pixels, where a step of 1 is right. A few values are
+    // ratios or alphas living between 0 and 2, and dragging those by whole
+    // units skips their entire useful range in one pixel of mouse travel.
+    const fine = Math.abs(layoutStore.getDefault(path)) <= 2;
+    const unit = fine ? 0.01 : 1;
+    input.step = String(unit);
 
     // Shows what this value started as, and puts it back when clicked — so
     // the original is always visible, not just recoverable via a global reset.
@@ -161,8 +166,10 @@ export function mountEditor(game) {
       const move = (ev) =>
         push(
           Math.round(
-            (startVal + (ev.clientX - startX) * (ev.shiftKey ? 0.25 : 1)) * 100,
-          ) / 100,
+            (startVal +
+              (ev.clientX - startX) * unit * (ev.shiftKey ? 0.25 : 1)) *
+              1000,
+          ) / 1000,
         );
       const up = () => {
         lab.removeEventListener("pointermove", move);

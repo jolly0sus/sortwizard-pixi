@@ -40,17 +40,22 @@ export class Conveyor {
     // shadow under the belt so it reads as lifted off the board
     const shade = new Sprite(textures.boxShadow);
     shade.anchor.set(0.5);
-    shade.width = beltW * 1.02;
-    shade.height = beltH * 1.15;
+    shade.width = beltW * c.shadowScale;
+    shade.height = beltH * (c.shadowScale + 0.13);
     shade.x = c.xLeft + beltW / 2;
-    shade.y = this.cy + 12;
-    shade.alpha = 0.3;
+    shade.y = this.cy + c.shadowDrop;
+    shade.alpha = c.shadowAlpha;
     this.layer.addChild(shade);
 
+    // capWidth is how much of the source art each rounded end keeps at its own
+    // scale; only the strip between the two caps is stretched to length. Raise
+    // it for longer, blunter ends, lower it for tighter ones. Too high and the
+    // caps overlap, so it is held to just under half the belt.
+    const cap = Math.min(c.capWidth, textures.base.width / 2 - 1);
     const base = new NineSliceSprite({
       texture: textures.base,
-      leftWidth: 420,
-      rightWidth: 420,
+      leftWidth: cap,
+      rightWidth: cap,
       topHeight: 0,
       bottomHeight: 0,
     });

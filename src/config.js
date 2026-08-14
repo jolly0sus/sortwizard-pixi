@@ -243,6 +243,16 @@ export const LAYOUT = {
     // The capsule pinches to nothing at its extreme x, so the turn has to be
     // held well back or the rotated slots clip through the rim on the corners.
     pathInset: 50,
+    // Shape of the purple belt itself. The art is stretched as a nine-slice,
+    // so capWidth decides how much of each rounded end is kept at its own
+    // scale rather than pulled along with the middle: larger means longer,
+    // blunter caps. It is clamped to just under half the source so the two
+    // ends cannot overlap.
+    capWidth: 420,
+    // The drop shadow that lifts the belt off the board.
+    shadowScale: 1.02,
+    shadowDrop: 12,
+    shadowAlpha: 0.3,
     // Horizontal radius of the loop's turns.
     pathRadius: 14,
     // Vertical half-distance between the two slot rows. The original sets its
