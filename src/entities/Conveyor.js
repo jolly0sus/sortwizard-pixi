@@ -2,30 +2,11 @@ import { Container, Sprite, MeshPlane } from "pixi.js";
 import { LAYOUT } from "../config.js";
 import { audio } from "../audio.js";
 
-// How tall the belt is at a given x, from LAYOUT.conveyor.shape — half its
-// height, measured from the centre line, linearly interpolated between the
-// table's points.
-function beltHalfHeightAt(c, x) {
-  const pts = c.shape;
-  if (x <= pts[0][0]) return pts[0][1];
-  const last = pts[pts.length - 1];
-  if (x >= last[0]) return last[1];
-  let lo = 0;
-  let hi = pts.length - 1;
-  while (hi - lo > 1) {
-    const mid = (lo + hi) >> 1;
-    if (pts[mid][0] <= x) lo = mid;
-    else hi = mid;
-  }
-  const [x0, h0] = pts[lo];
-  const [x1, h1] = pts[hi];
-  return h0 + ((h1 - h0) * (x - x0)) / (x1 - x0);
-}
-
-// Grid the belt texture is drawn on. Enough columns to follow a curve without
-// faceting; two rows would stretch the interior linearly, so a few more keep
-// the centre track where it belongs.
-const MESH_COLUMNS = 60;
+// Rows in the grid the belt texture is drawn on. Its COLUMNS are not a fixed
+// count: there is one per point of LAYOUT.conveyor.shape, standing exactly
+// where that point puts it. That is what makes the rounded ends editable —
+// with columns spread evenly and only their height read from the table, a
+// point could be dragged sideways all day and the artwork would not move.
 const MESH_ROWS = 6;
 
 // Stadium-shaped ("racetrack") belt: two straight runs joined by semicircular
@@ -83,7 +64,7 @@ export class Conveyor {
     // the belt renders exactly as the plain sprite did.
     const base = new MeshPlane({
       texture: textures.base,
-      verticesX: MESH_COLUMNS,
+      verticesX: c.shape.length,
       verticesY: MESH_ROWS,
     });
     this.beltMesh = base;
@@ -113,25 +94,27 @@ export class Conveyor {
     this.freeBalls = new Set();
   }
 
-  // Push the grid's vertices out to the outline. Column i spans the belt from
-  // xLeft to xRight; each row is placed as a fraction of that column's height,
-  // so the texture is squeezed or stretched vertically to fit and its rim
-  // lands exactly on the shape.
+  // Lay the grid over the outline: one column per point, standing at that
+  // point's x and reaching its half-height above and below the centre line.
+  // The texture is spread evenly across the columns, so with the default table
+  // — evenly spaced, constant height — the grid is flat and the belt renders
+  // exactly as the untouched sprite. Move a point and the artwork under it
+  // moves too, rim included, which is the whole purpose.
   _shapeBelt(c) {
     const mesh = this.beltMesh;
-    const positions = mesh.geometry.getBuffer("aPosition").data;
-    for (let ix = 0; ix < MESH_COLUMNS; ix++) {
-      const t = ix / (MESH_COLUMNS - 1);
-      const x = c.xLeft + (c.xRight - c.xLeft) * t;
-      const half = beltHalfHeightAt(c, x);
+    const pts = c.shape;
+    const buffer = mesh.geometry.getBuffer("aPosition");
+    const positions = buffer.data;
+    for (let ix = 0; ix < pts.length; ix++) {
+      const [x, half] = pts[ix];
       for (let iy = 0; iy < MESH_ROWS; iy++) {
         const v = iy / (MESH_ROWS - 1); // 0 at the top edge, 1 at the bottom
-        const i = (iy * MESH_COLUMNS + ix) * 2;
+        const i = (iy * pts.length + ix) * 2;
         positions[i] = x;
         positions[i + 1] = this.cy + (v * 2 - 1) * half;
       }
     }
-    mesh.geometry.getBuffer("aPosition").update();
+    buffer.update();
   }
 
   pointAtDistance(d) {
