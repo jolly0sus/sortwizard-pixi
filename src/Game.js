@@ -48,6 +48,27 @@ const SLEEP_SPEED = 26;
 // physics follow without a reload.
 const laneHalf = () => LAYOUT.multiplier.pillW / 2;
 const laneReleaseY = () => LAYOUT.multiplier.centerY + 46;
+// How fast a ball may sink once the board starts closing in, in px/s. The
+// funnel is a bottleneck and has to read as one: in free fall a ball entered
+// the waist at ~700px/s and a whole box poured onto the belt in under two
+// seconds, which looked like a chute rather than a crowd being squeezed. The
+// cap eases from the first of these at the top of the pinch down to the second
+// at the waist, and holds there until the belt, so the balls bunch up above
+// the neck and go through in single file. Nothing above the funnel is touched
+// — the throw out of the box has to stay lively.
+const FUNNEL_ENTRY_FALL = 420;
+const THROAT_FALL = 150;
+// The traced silhouette's first row is where the flanks begin to converge.
+const funnelTopY = () => LAYOUT.board.profile[0][0];
+function funnelFallCap(y) {
+  const top = funnelTopY();
+  if (y <= top) return Infinity;
+  const t = Math.min(
+    1,
+    (y - top) / Math.max(1, LAYOUT.board.waistBottom - top),
+  );
+  return FUNNEL_ENTRY_FALL + (THROAT_FALL - FUNNEL_ENTRY_FALL) * t;
+}
 // How long a dead board must stay dead before the fail screen shows. Measured
 // in laps rather than seconds so it tracks the belt speed: a ball needs one
 // full lap to pass every column and prove nothing wants it. One and a half
@@ -326,6 +347,12 @@ function updateFreeBalls(world, conveyor, dt) {
   for (const ball of world.freeBalls) {
     if (!ball.freeFalling) continue;
     ball.vy += GRAVITY * dt;
+    // A ball on its way off the board is falling past everything and keeps its
+    // free fall; anything still in play is held to the funnel's pace.
+    if (!ball.discarded) {
+      const cap = funnelFallCap(ball.y);
+      if (ball.vy > cap) ball.vy = cap;
+    }
     ball.x += ball.vx * dt;
     ball.y += ball.vy * dt;
     ball.rotation += ball.vx * dt * 0.01;
