@@ -24,7 +24,7 @@ export class ProfileEditor {
     this.game = game;
     this.onChange = onChange;
     this.enabled = false;
-    this.selected = -1;
+    this.selected = null; // { contour, index }
 
     this.layer = new Container();
     this.layer.eventMode = "static";
@@ -53,8 +53,47 @@ export class ProfileEditor {
   setEnabled(on) {
     this.enabled = on;
     this.layer.visible = on;
-    if (!on) this.selected = -1;
+    if (!on) this.selected = null;
     this.redraw();
+  }
+
+  // The two point-defined outlines in the scene. The board is a column of
+  // half-widths mirrored about its vertical centre; the belt is the same idea
+  // lying down — half-heights along its length, mirrored about centerY. Both
+  // are edited the same way, so the difference is kept to this table.
+  get contours() {
+    return [
+      {
+        id: "board",
+        points: LAYOUT.board.profile,
+        // point -> screen: [across, along]
+        place: ([along, half], side) => ({
+          x: LAYOUT.board.x + LAYOUT.board.w / 2 + side * half,
+          y: along,
+        }),
+        // screen -> point
+        read: (p) => ({
+          along: p.y,
+          half: Math.abs(p.x - (LAYOUT.board.x + LAYOUT.board.w / 2)),
+        }),
+        side: (p) => (p.x >= LAYOUT.board.x + LAYOUT.board.w / 2 ? 1 : -1),
+        color: 0x00e5ff,
+      },
+      {
+        id: "belt",
+        points: LAYOUT.conveyor.shape,
+        place: ([along, half], side) => ({
+          x: along,
+          y: LAYOUT.conveyor.centerY + side * half,
+        }),
+        read: (p) => ({
+          along: p.x,
+          half: Math.abs(p.y - LAYOUT.conveyor.centerY),
+        }),
+        side: (p) => (p.y >= LAYOUT.conveyor.centerY ? 1 : -1),
+        color: 0xff7ae0,
+      },
+    ];
   }
 
   get profile() {
@@ -76,47 +115,54 @@ export class ProfileEditor {
     };
   }
 
-  // Index of the point nearest the pointer, on either flank, or -1.
+  // Nearest point across both outlines, on either flank, or null.
   _pointAt(p) {
-    const cx = this._cx();
-    let best = -1;
+    let best = null;
     let bestD = HIT / this.game.getRoot().scale.x;
-    this.profile.forEach(([y, half], i) => {
-      for (const x of [cx + half, cx - half]) {
-        const d = Math.hypot(p.x - x, p.y - y);
-        if (d < bestD) {
-          bestD = d;
-          best = i;
+    for (const c of this.contours) {
+      c.points.forEach((row, i) => {
+        for (const side of [1, -1]) {
+          const at = c.place(row, side);
+          const d = Math.hypot(p.x - at.x, p.y - at.y);
+          if (d < bestD) {
+            bestD = d;
+            best = { contour: c, index: i };
+          }
         }
-      }
-    });
+      });
+    }
     return best;
   }
 
   _pick(e) {
     if (!this.enabled) return;
     const p = this._toDesign(e.clientX, e.clientY);
-    const i = this._pointAt(p);
-    if (i < 0) return;
+    const hit = this._pointAt(p);
+    if (!hit) return;
     e.stopPropagation();
     e.preventDefault();
-    this.selected = i;
-    this._drag = { index: i, side: p.x >= this._cx() ? 1 : -1 };
+    this.selected = hit;
+    this._drag = hit;
+  }
+
+  // Points stay ordered along their axis, so an outline can never fold back on
+  // itself and turn inside out mid-drag.
+  _clampAlong(points, index, along) {
+    const prev = points[index - 1];
+    const next = points[index + 1];
+    const lo = prev ? prev[0] + 1 : -Infinity;
+    const hi = next ? next[0] - 1 : Infinity;
+    return Math.round(Math.min(hi, Math.max(lo, along)));
   }
 
   _move(e) {
     if (!this._drag) return;
+    const { contour, index } = this._drag;
     const p = this._toDesign(e.clientX, e.clientY);
-    const row = this.profile[this._drag.index];
-    // half-width from the pointer's distance to the centre line, whichever
-    // flank was grabbed
-    row[1] = Math.max(8, Math.round(Math.abs(p.x - this._cx()) * 10) / 10);
-    // y stays ordered, so the table never folds back on itself
-    const prev = this.profile[this._drag.index - 1];
-    const next = this.profile[this._drag.index + 1];
-    const lo = prev ? prev[0] + 1 : -Infinity;
-    const hi = next ? next[0] - 1 : Infinity;
-    row[0] = Math.round(Math.min(hi, Math.max(lo, p.y)));
+    const row = contour.points[index];
+    const read = contour.read(p);
+    row[1] = Math.max(0, Math.round(read.half * 10) / 10);
+    row[0] = this._clampAlong(contour.points, index, read.along);
     this.onChange?.();
   }
 
@@ -127,16 +173,18 @@ export class ProfileEditor {
   }
 
   _key(e) {
-    if (!this.enabled || this.selected < 0) return;
+    if (!this.enabled || !this.selected) return;
     if (e.target instanceof HTMLInputElement) return;
-    const row = this.profile[this.selected];
+    const { contour, index } = this.selected;
+    const points = contour.points;
+    const row = points[index];
     const step = e.shiftKey ? 5 : 1;
 
     // insert a point halfway to the next one, or drop this one
     if (e.key === "+" || e.key === "=") {
-      const next = this.profile[this.selected + 1];
+      const next = points[index + 1];
       if (!next) return;
-      this.profile.splice(this.selected + 1, 0, [
+      points.splice(index + 1, 0, [
         Math.round((row[0] + next[0]) / 2),
         Math.round(((row[1] + next[1]) / 2) * 10) / 10,
       ]);
@@ -145,14 +193,16 @@ export class ProfileEditor {
       return;
     }
     if (e.key === "Delete" || e.key === "-") {
-      if (this.profile.length <= 2) return;
-      this.profile.splice(this.selected, 1);
-      this.selected = Math.min(this.selected, this.profile.length - 1);
+      if (points.length <= 2) return;
+      points.splice(index, 1);
+      this.selected = { contour, index: Math.min(index, points.length - 1) };
       e.preventDefault();
       this.onChange?.();
       return;
     }
 
+    // Arrows always mean "wider/narrower" and "further along", whichever way
+    // the outline happens to lie.
     const nudge = {
       ArrowLeft: [-step, 0],
       ArrowRight: [step, 0],
@@ -161,12 +211,11 @@ export class ProfileEditor {
     }[e.key];
     if (!nudge) return;
     e.preventDefault();
-    row[1] = Math.max(8, Math.round((row[1] + nudge[0]) * 10) / 10);
-    const prev = this.profile[this.selected - 1];
-    const next = this.profile[this.selected + 1];
-    const lo = prev ? prev[0] + 1 : -Infinity;
-    const hi = next ? next[0] - 1 : Infinity;
-    row[0] = Math.round(Math.min(hi, Math.max(lo, row[0] + nudge[1])));
+    const acrossFirst = contour.id === "board";
+    const dHalf = acrossFirst ? nudge[0] : nudge[1];
+    const dAlong = acrossFirst ? nudge[1] : nudge[0];
+    row[1] = Math.max(0, Math.round((row[1] + dHalf) * 10) / 10);
+    row[0] = this._clampAlong(points, index, row[0] + dAlong);
     this.onChange?.();
   }
 
@@ -175,31 +224,33 @@ export class ProfileEditor {
     const root = this.game.getRoot();
     this.layer.position.set(root.x, root.y);
     this.layer.scale.set(root.scale.x, root.scale.y);
-
-    const cx = this._cx();
     const s = 1 / root.scale.x;
 
     this.line.clear();
-    const p = this.profile;
-    for (const side of [1, -1]) {
-      p.forEach(([y, half], i) => {
-        const x = cx + side * half;
-        if (i === 0) this.line.moveTo(x, y);
-        else this.line.lineTo(x, y);
-      });
-      this.line.stroke({ color: 0x00e5ff, width: 1.5 * s, alpha: 0.9 });
-    }
-
     this.dots.clear();
-    p.forEach(([y, half], i) => {
-      const on = i === this.selected;
+
+    for (const c of this.contours) {
       for (const side of [1, -1]) {
-        this.dots
-          .circle(cx + side * half, y, (on ? HANDLE : HANDLE - 3) * s)
-          .fill({ color: on ? 0xffdc00 : 0x00e5ff, alpha: on ? 1 : 0.75 })
-          .stroke({ color: 0x102030, width: 1.5 * s });
+        c.points.forEach((row, i) => {
+          const at = c.place(row, side);
+          if (i === 0) this.line.moveTo(at.x, at.y);
+          else this.line.lineTo(at.x, at.y);
+        });
+        this.line.stroke({ color: c.color, width: 1.5 * s, alpha: 0.9 });
       }
-    });
+
+      c.points.forEach((row, i) => {
+        const on =
+          this.selected?.contour.id === c.id && this.selected.index === i;
+        for (const side of [1, -1]) {
+          const at = c.place(row, side);
+          this.dots
+            .circle(at.x, at.y, (on ? HANDLE : HANDLE - 3) * s)
+            .fill({ color: on ? 0xffdc00 : c.color, alpha: on ? 1 : 0.75 })
+            .stroke({ color: 0x102030, width: 1.5 * s });
+        }
+      });
+    }
   }
 
   destroy() {

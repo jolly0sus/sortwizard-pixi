@@ -1,6 +1,23 @@
-import { Container, Sprite, NineSliceSprite } from "pixi.js";
+import { Container, Sprite, NineSliceSprite, Graphics } from "pixi.js";
 import { LAYOUT } from "../config.js";
 import { audio } from "../audio.js";
+
+// Walks LAYOUT.conveyor.shape down one flank and back along the other, so the
+// belt is a single closed outline mirrored about its centre line. `inset`
+// pulls it inward, which is how the bright inner lip is drawn from the same
+// path as the rim.
+function traceBeltPath(g, c, cy, inset = 0) {
+  const pts = c.shape;
+  const half = (h) => Math.max(0, h - inset);
+  g.moveTo(pts[0][0], cy - half(pts[0][1]));
+  for (let i = 1; i < pts.length; i++) {
+    g.lineTo(pts[i][0], cy - half(pts[i][1]));
+  }
+  for (let i = pts.length - 1; i >= 0; i--) {
+    g.lineTo(pts[i][0], cy + half(pts[i][1]));
+  }
+  g.closePath();
+}
 
 // Stadium-shaped ("racetrack") belt: two straight runs joined by semicircular
 // ends. Only the TOP straight run captures falling balls (the original's
@@ -47,10 +64,16 @@ export class Conveyor {
     shade.alpha = c.shadowAlpha;
     this.layer.addChild(shade);
 
-    // capWidth is how much of the source art each rounded end keeps at its own
-    // scale; only the strip between the two caps is stretched to length. Raise
-    // it for longer, blunter ends, lower it for tighter ones. Too high and the
-    // caps overlap, so it is held to just under half the belt.
+    // The belt is drawn from LAYOUT.conveyor.shape rather than left as a
+    // stretched sprite, so its outline can be edited point by point like the
+    // board's. The artwork still supplies the interior — the grooves and the
+    // track line down the middle — by being masked to that outline; only the
+    // rim is drawn, along the same path.
+    const clip = new Graphics();
+    traceBeltPath(clip, c, this.cy);
+    clip.fill({ color: 0xffffff });
+    this.layer.addChild(clip);
+
     const cap = Math.min(c.capWidth, textures.base.width / 2 - 1);
     const base = new NineSliceSprite({
       texture: textures.base,
@@ -63,7 +86,31 @@ export class Conveyor {
     base.height = beltH;
     base.x = c.xLeft;
     base.y = this.cy - beltH / 2;
+    base.mask = clip;
     this.layer.addChild(base);
+
+    // Rim along the outline, as concentric rings rather than one flat stroke.
+    // Sampling the source art down through its edge gives a light lip on the
+    // outside falling to a deep purple against the interior (#ffc6ff, #e7aaff,
+    // #c179e6, #8129a2), and a single colour lost that roundness completely.
+    const rim = new Graphics();
+    const rings = [
+      { inset: -2, width: 6, color: 0xffc6ff, alpha: 0.9 },
+      { inset: 1, width: 10, color: c.rimLight, alpha: 1 },
+      { inset: 5, width: 9, color: 0xc179e6, alpha: 1 },
+      { inset: 9, width: 7, color: c.rimColor, alpha: 1 },
+    ];
+    for (const ring of rings) {
+      traceBeltPath(rim, c, this.cy, ring.inset);
+      rim.stroke({
+        color: ring.color,
+        width: ring.width,
+        alignment: 0.5,
+        alpha: ring.alpha,
+      });
+    }
+    this.layer.addChild(rim);
+
     this.beltHeight = beltH;
 
     this.cellLayer = new Container();
