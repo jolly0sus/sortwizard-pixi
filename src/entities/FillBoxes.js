@@ -131,8 +131,26 @@ class Tile {
     ball.y = localY;
 
     tweenTo(ball, { y: fc.slotY }, 0.2, ease.inQuad, () => {
+      // A bloom rather than a bulb switching off: the ball flares, a ring of
+      // light opens out of it and fades, and only then does the ball settle
+      // back to its normal shade.
       ball.glow(true);
-      delay(0.25, () => ball.glow(false));
+      const spark = new Graphics()
+        .circle(0, 0, 26)
+        .stroke({ color: 0xffffff, width: 7, alpha: 0.95 });
+      spark.x = ball.x;
+      spark.y = ball.y;
+      this.ballHolder.addChild(spark);
+      // Both tweens touch the same object, so only the one that finishes last
+      // may destroy it — otherwise the survivor writes to a freed .scale on
+      // its next frame and throws.
+      let running = 2;
+      const finished = () => {
+        if (--running === 0 && !spark.destroyed) spark.destroy();
+      };
+      tweenTo(spark.scale, { x: 2.1, y: 2.1 }, 0.34, ease.outQuad, finished);
+      tweenTo(spark, { alpha: 0 }, 0.34, ease.outQuad, finished);
+      delay(0.45, () => ball.glow(false));
       audio.playBallInBox();
       this.balls[slotIdx] = ball;
       this.landedCount++;

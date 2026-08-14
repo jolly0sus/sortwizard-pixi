@@ -75,7 +75,9 @@ export class Conveyor {
     // catching the light at the top and shade pooling at the bottom, which is
     // what makes the slot look pressed into the belt instead of printed on it.
     for (let i = 0; i < this.cellCount; i++) {
-      const tex = i % 6 < 3 ? textures.cellDark : textures.cellLight;
+      // One tone for every slot. They used to alternate in threes, which read
+      // as a light and a dark set rather than one belt.
+      const tex = textures.cellLight;
       const holder = new Container();
 
       const shade = new Sprite(tex);

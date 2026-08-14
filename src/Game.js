@@ -33,6 +33,14 @@ import {
 } from "./ui.js";
 
 const GRAVITY = 900;
+// Contact handling for a heap of balls. A little tolerated overlap and a
+// partial push stop the pile from vibrating; the rest kills the energy that
+// made balls hop off one another.
+const SLOP = 1.5;
+const SEPARATION = 0.7;
+const FRICTION = 0.25;
+// Below this, a contact is treated as resting and the motion is dropped.
+const SLEEP_SPEED = 26;
 // Matches the original's maxFreeBalls: taps are refused (box shakes) while
 // this many balls are loose on the board.
 // Column pen: half a pill wide, released just past the multiplier line.
@@ -359,9 +367,16 @@ function updateFreeBalls(world, conveyor, dt) {
 
     if (ball.y >= floorY && ball.vy > 0) {
       ball.y = floorY;
-      ball.vy *= -0.3;
-      ball.vx *= 0.7;
-      if (Math.abs(ball.vy) < 40) ball.vy = 0;
+      // No rebound off the shoulder either — it lands and stays.
+      ball.vy = 0;
+      ball.vx *= 0.6;
+    }
+
+    // Anything crawling is put to sleep, which is what stops the last twitch
+    // in a settled heap.
+    if (Math.abs(ball.vx) < SLEEP_SPEED && Math.abs(ball.vy) < SLEEP_SPEED) {
+      ball.vx *= 0.5;
+      if (Math.abs(ball.vx) < 3) ball.vx = 0;
     }
   }
 
@@ -407,7 +422,11 @@ function resolveBallCollisions(world, floorY, radius) {
         const d = Math.sqrt(d2);
         const nx = dx / d;
         const ny = dy / d;
-        const push = (minDist - d) / 2;
+
+        // Leave a hair of overlap alone and correct the rest only partly.
+        // Pushing every pair fully apart every frame fought gravity pressing
+        // them back together, and the pile buzzed.
+        const push = Math.max(0, minDist - d - SLOP) * 0.5 * SEPARATION;
         a.x -= nx * push;
         a.y -= ny * push;
         b.x += nx * push;
@@ -415,11 +434,20 @@ function resolveBallCollisions(world, floorY, radius) {
 
         const rel = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
         if (rel < 0) {
-          const imp = rel * 0.5;
-          a.vx += nx * imp;
-          a.vy += ny * imp;
-          b.vx -= nx * imp;
-          b.vy -= ny * imp;
+          // Dead stop along the normal instead of a bounce: balls settling on
+          // a heap should stay put, not spring off each other.
+          a.vx += nx * rel;
+          a.vy += ny * rel;
+
+          // Rub off a little of the sideways slide too, so a ball that lands
+          // on the pile stops rolling instead of skating along it.
+          const tx = -ny;
+          const ty = nx;
+          const slide = (b.vx - a.vx) * tx + (b.vy - a.vy) * ty;
+          a.vx += tx * slide * FRICTION;
+          a.vy += ty * slide * FRICTION;
+          b.vx -= tx * slide * FRICTION;
+          b.vy -= ty * slide * FRICTION;
         }
       }
     }

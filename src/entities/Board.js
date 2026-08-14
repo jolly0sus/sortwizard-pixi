@@ -106,6 +106,20 @@ export function buildBoard(root, textures) {
 
   const b = LAYOUT.board;
 
+  // The board throws a shadow onto the purple. Sampling the reference at the
+  // screen edge shows the background darkening from 0x4f0589 down to 0x3a006f
+  // where the board is widest and back again past it — the colour itself was
+  // already right, what was missing was this. Built from the board's own
+  // outline drawn a few times, each wider and fainter, which reads as a soft
+  // edge without a blur filter.
+  const cast = new Graphics();
+  for (let i = 6; i >= 1; i--) {
+    traceBoardPath(cast, -i * 5);
+    cast.stroke({ color: 0x1a0033, width: 22, alpha: 0.09, alignment: 0.5 });
+  }
+  cast.y = 10;
+  layer.addChild(cast);
+
   const shape = new Graphics();
   traceBoardPath(shape);
   shape.fill({ color: PALETTE.wood });
