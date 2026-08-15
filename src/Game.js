@@ -257,7 +257,6 @@ function buildScene(app, textures) {
 
   let jamTimer = 0;
   let winTimer = 0;
-  let spentTimer = 0;
 
   // initial hint: point at a box whose colour an open tray is waiting for
   const hintTimer = setTimeout(() => {
@@ -285,48 +284,49 @@ function buildScene(app, textures) {
       if (winTimer >= 0.6) maybeShowResult("win");
     }
 
-    // Deadlock check. The belt has to stay jammed with nothing the open trays
-    // want for a moment before it counts, so a tray swapping mid-frame can't
-    // trigger a fail the player had no chance to avoid.
+    // Deadlock check. Held for a moment before it counts, so a tray clearing
+    // mid-frame can't trigger a fail the player had no chance to avoid.
     if (!resultShown) {
-      let jammed = false;
-      // Balls already committed to the loop: riding it, plus the ones still
-      // falling that are on their way to it. Counting the fallers is what
-      // makes the verdict prompt — waiting for the belt to physically fill up
-      // took 21 seconds after a wrong tap, even though the run was decided the
-      // moment those 27 homeless balls left the box.
+      const openColors = fillBoxManager.getOpenColors();
+      const wanted = (b) => b && openColors.has(b.color);
       const riding = conveyor.getOccupiedCells().map((c) => c.ball);
-      const committed = [...riding, ...world.freeBalls];
+      // Heaped above the throat or still falling. A discarded ball is on its
+      // way off the board and is nobody's business here.
+      const waiting = [...world.freeBalls].filter((b) => b && !b.discarded);
       const pending = sourceBoxManager.pendingByColor();
-      // A ball that has not reached the x3 bar yet is three balls in waiting,
-      // and counting it as one was most of the delay: the check sat at 9 of
-      // the 27 it needed until the last one had crossed.
-      let total = committed.reduce(
+
+      // The belt is the whole game. A tray is only ever fed from it, and a
+      // cell only comes free when a tray takes the ball off it — so if nothing
+      // riding is wanted, no cell will ever open again, and it does not matter
+      // how many balls are heaped above the throat or what colour they are:
+      // none of them can board. Counting that heap as "still in play" is what
+      // softlocked a board with a hundred balls in the funnel, the pipes empty
+      // and neither verdict ever firing.
+      const stuck = conveyor.isFull();
+      // Same board, the other way round: nothing is coming either, so what is
+      // riding now is all there will ever be.
+      const spent =
+        !waiting.length && !pending.size && sourceBoxManager.allExhausted();
+
+      // And the early verdict, so a decided run does not make the player watch
+      // the loop fill up first: if everything still to come — riding, heaped,
+      // and owed by a tapped box — adds up to a beltful and none of it is
+      // wanted, the board is already lost. A ball that has not crossed the x3
+      // bar yet is three balls in waiting, which is what makes the count
+      // reach a beltful in time to matter.
+      let total = [...riding, ...waiting].reduce(
         (n, b) => n + (b && !b.alreadyMultiplied ? ECONOMY.multiplier : 1),
         0,
       );
       for (const n of pending.values()) total += n;
-      if (total >= conveyor.cells.length) {
-        const openColors = fillBoxManager.getOpenColors();
-        jammed =
-          !committed.some((b) => b && openColors.has(b.color)) &&
-          ![...pending.keys()].some((c) => openColors.has(c));
-      }
-      jamTimer = jammed ? jamTimer + dt : 0;
-      if (jamTimer >= JAM_FAIL_SECONDS) maybeShowResult("fail");
-    }
+      const beltfulComing =
+        total >= conveyor.cells.length &&
+        !waiting.some(wanted) &&
+        ![...pending.keys()].some((c) => openColors.has(c));
 
-    // Out of moves: every box spent, nothing in flight and nothing on the belt
-    // any open tray wants. Without this the board would just sit there dead.
-    if (!resultShown && sourceBoxManager.allExhausted()) {
-      const openColors = fillBoxManager.getOpenColors();
-      const playable =
-        world.freeBalls.size > 0 ||
-        conveyor
-          .getOccupiedCells()
-          .some((c) => c.ball && openColors.has(c.ball.color));
-      spentTimer = playable ? 0 : spentTimer + dt;
-      if (spentTimer >= JAM_FAIL_SECONDS) maybeShowResult("fail");
+      const dead = !riding.some(wanted) && (stuck || spent || beltfulComing);
+      jamTimer = dead ? jamTimer + dt : 0;
+      if (jamTimer >= JAM_FAIL_SECONDS) maybeShowResult("fail");
     }
   };
   app.ticker.add(tick);
