@@ -139,6 +139,18 @@ export function buildBoard(root, textures) {
     wood.height = b.bottom - b.y;
     wood.mask = clip;
     layer.addChild(wood);
+
+    // Sampling bare board in the reference and here — between the pipes, under
+    // the x3 bar, on the funnel wall — puts our panel about 12/11/8 of 255
+    // below it, evenly, so the strip we cut from TanBackingRender is simply a
+    // shade darker than the board it came off. Add that back instead of
+    // re-tinting: a tint multiplies, which would flatten the grain, while this
+    // lifts every pixel by the same amount and leaves the contrast alone.
+    const lift = new Graphics();
+    traceBoardPath(lift);
+    lift.fill({ color: 0x0c0b08 });
+    lift.blendMode = "add";
+    layer.addChild(lift);
   }
 
   // the wood sits down inside the frame, so darken it as it nears the rim
