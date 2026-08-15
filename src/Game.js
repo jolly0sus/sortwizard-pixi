@@ -39,6 +39,13 @@ const GRAVITY = 900;
 const SLOP = 1.5;
 const SEPARATION = 0.7;
 const FRICTION = 0.25;
+// Ceiling on how far one pass may move a ball, in px, and how much of that it
+// may spend going up. Overlap is then worked off over several frames, which
+// reads as a pile settling instead of a ball being spat out of it.
+const MAX_PUSH_PER_PASS = 3;
+const UPWARD_PUSH = 0.45;
+// Softer per pass than the old two, so the same overlap still clears quickly.
+const PUSH_PASSES = 3;
 // Below this, a contact is treated as resting and the motion is dropped.
 const SLEEP_SPEED = 26;
 // Matches the original's maxFreeBalls: taps are refused (box shakes) while
@@ -458,7 +465,18 @@ function resolveBallCollisions(world, floorY, radius) {
   if (balls.length < 2) return;
 
   const minDist = radius * 2;
-  for (let pass = 0; pass < 2; pass++) {
+  // Corrections are gathered per ball and applied at the end of each pass
+  // rather than pair by pair. Applied as they were found, a ball wedged in a
+  // crowd took the push from every neighbour in full and in turn: measured on
+  // a three-tap heap, one of them was moved 79px — nearly two diameters — in a
+  // single frame, which is the popping that looked like a bug. Gathering them
+  // first means the frame's whole correction can be capped.
+  const pushX = new Float64Array(balls.length);
+  const pushY = new Float64Array(balls.length);
+
+  for (let pass = 0; pass < PUSH_PASSES; pass++) {
+    pushX.fill(0);
+    pushY.fill(0);
     for (let i = 0; i < balls.length; i++) {
       const a = balls[i];
       for (let j = i + 1; j < balls.length; j++) {
@@ -476,10 +494,10 @@ function resolveBallCollisions(world, floorY, radius) {
         // Pushing every pair fully apart every frame fought gravity pressing
         // them back together, and the pile buzzed.
         const push = Math.max(0, minDist - d - SLOP) * 0.5 * SEPARATION;
-        a.x -= nx * push;
-        a.y -= ny * push;
-        b.x += nx * push;
-        b.y += ny * push;
+        pushX[i] -= nx * push;
+        pushY[i] -= ny * push;
+        pushX[j] += nx * push;
+        pushY[j] += ny * push;
 
         const rel = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
         if (rel < 0) {
@@ -499,6 +517,24 @@ function resolveBallCollisions(world, floorY, radius) {
           b.vy -= ty * slide * FRICTION;
         }
       }
+    }
+
+    for (let i = 0; i < balls.length; i++) {
+      let dx = pushX[i];
+      let dy = pushY[i];
+      const len = Math.hypot(dx, dy);
+      if (len > MAX_PUSH_PER_PASS) {
+        const k = MAX_PUSH_PER_PASS / len;
+        dx *= k;
+        dy *= k;
+      }
+      // A crowd resolves downward and sideways, never by launching someone out
+      // of the top of it. Gravity closes whatever gap is left on the next
+      // frame, so lifting a ball is only ever the solver's shortest way out,
+      // not something the pile should actually do.
+      if (dy < 0) dy *= UPWARD_PUSH;
+      balls[i].x += dx;
+      balls[i].y += dy;
     }
   }
 
