@@ -48,26 +48,34 @@ const SLEEP_SPEED = 26;
 // physics follow without a reload.
 const laneHalf = () => LAYOUT.multiplier.pillW / 2;
 const laneReleaseY = () => LAYOUT.multiplier.centerY + 46;
-// How fast a ball may sink once the board starts closing in, in px/s. The
-// funnel is a bottleneck and has to read as one: in free fall a ball entered
-// the waist at ~700px/s and a whole box poured onto the belt in under two
-// seconds, which looked like a chute rather than a crowd being squeezed. The
-// cap eases from the first of these at the top of the pinch down to the second
-// at the waist, and holds there until the belt, so the balls bunch up above
-// the neck and go through in single file. Nothing above the funnel is touched
-// — the throw out of the box has to stay lively.
-const FUNNEL_ENTRY_FALL = 420;
+// What one tap is worth on the board: a cup of nine, trebled at the bar.
+const BALLS_PER_TAP = ECONOMY.ballsPerBox * ECONOMY.multiplier;
+// How much may be in the air at once. Three taps, matching the reference: mash
+// its pipes and it lets three boxes out, then refuses until the funnel drains.
+const MAX_BALLS_IN_FLIGHT = 3 * BALLS_PER_TAP;
+// How fast a ball may sink on its way to the belt, in px/s, capped from the
+// multiplier bar down.
+//
+// The cap used to start where the silhouette begins to pinch, 130px lower, and
+// everything above that was free fall: balls left the cup, were never seen
+// crossing the board, and appeared already piled at the neck — the dive the
+// reference does not have. There the same tap spreads across the funnel and
+// sinks as one mass; its tail measures ~154 design px/s through the pinch,
+// which is where the lower figure comes from. Taking the cap up to the bar is
+// what removes the dive: from there down the descent is metered the whole way,
+// so the crowd is visible sliding rather than teleporting into the throat.
+//
+// Above the bar nothing is touched — the throw out of the cup stays lively.
+const GATE_FALL = 330;
 const THROAT_FALL = 150;
-// The traced silhouette's first row is where the flanks begin to converge.
-const funnelTopY = () => LAYOUT.board.profile[0][0];
 function funnelFallCap(y) {
-  const top = funnelTopY();
+  const top = laneReleaseY();
   if (y <= top) return Infinity;
   const t = Math.min(
     1,
     (y - top) / Math.max(1, LAYOUT.board.waistBottom - top),
   );
-  return FUNNEL_ENTRY_FALL + (THROAT_FALL - FUNNEL_ENTRY_FALL) * t;
+  return GATE_FALL + (THROAT_FALL - GATE_FALL) * t;
 }
 // How long a dead board must stay dead before the fail screen shows. Measured
 // in laps rather than seconds so it tracks the belt speed: a ball needs one
@@ -195,13 +203,16 @@ function buildScene(app, textures) {
     // deadlocks; hold out for taps the open trays can swallow whole and it
     // stays clean to the end.
     canLaunchBalls() {
-      // Nothing is ever refused. Not the colour — tapping one the front is
-      // not asking for is the losing move, and blocking it would remove the
-      // only way to lose. And not the belt either: sending several boxes at
-      // once is allowed, the surplus simply waits above the loop for a slot
-      // to come free. Firing more than the board can take is a mistake the
-      // player is entitled to make.
-      return true;
+      // Colour is never refused: tapping one the front trays are not asking
+      // for is the losing move, and blocking it would remove the only way to
+      // lose. How *much* is in the air is refused, though, and the reference
+      // does the same — mashing all three pipes there lets exactly three boxes
+      // out and then shakes off every further tap until the funnel drains.
+      // Without it a player can mash out all twelve boxes and bury the board
+      // under three hundred balls.
+      let inFlight = world.freeBalls.size;
+      for (const n of sourceBoxManager.pendingByColor().values()) inFlight += n;
+      return inFlight + BALLS_PER_TAP <= MAX_BALLS_IN_FLIGHT;
     },
     checkVictory() {
       // Only a hint that something finished; the ticker owns the real test so
