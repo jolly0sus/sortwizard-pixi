@@ -61,6 +61,7 @@ class Pill {
       );
       bolt.anchor.set(0.5);
       bolt.blendMode = "add";
+      bolt.tint = 0xbfe8ff;
       bolt.rotation = Math.PI / 2;
       bolt.alpha = 0;
       root.addChild(bolt);
@@ -125,14 +126,14 @@ class Pill {
         b.sprite.texture =
           t.lightning[Math.floor(Math.random() * t.lightning.length)];
         b.sprite.position.set(
-          (Math.random() - 0.5) * (m.forcefield.w - 40),
-          (Math.random() - 0.5) * m.forcefield.h * 0.4,
+          (Math.random() - 0.5) * (m.forcefield.w - 50),
+          (Math.random() - 0.5) * m.forcefield.h * 0.5,
         );
-        const s = 0.35 + Math.random() * 0.3;
-        b.sprite.height = m.forcefield.w * s;
-        b.sprite.width = m.forcefield.h * (0.5 + Math.random() * 0.3);
-        b.sprite.alpha = 0.5 + Math.random() * 0.5;
-        b.timer = 0.05 + Math.random() * 0.35;
+        // thin jagged streak, roughly half a pill long
+        b.sprite.height = m.forcefield.w * (0.3 + Math.random() * 0.25);
+        b.sprite.width = m.forcefield.h * (0.3 + Math.random() * 0.25);
+        b.sprite.alpha = 0.35 + Math.random() * 0.45;
+        b.timer = 0.08 + Math.random() * 0.5;
       } else {
         b.sprite.alpha *= Math.pow(0.02, dt); // fast decay
       }
