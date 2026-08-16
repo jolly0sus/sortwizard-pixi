@@ -305,8 +305,9 @@ export const LAYOUT = {
     bulge: ls(20),
     // filled-box rise before it pops (+40 local)
     rise: ls(40),
-    hitEffectSize: ls(110),
-    fillEffectSize: ls(170),
+    // the landing light: a narrow vertical column, ball-wide (the original's
+    // ParticleBallLitBeam), never a square blob
+    hitEffect: { w: ls(44), h: ls(106) },
   },
 
   ui: {

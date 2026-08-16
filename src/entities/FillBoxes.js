@@ -339,9 +339,6 @@ class FillBox {
       () =>
         tweenTo(this.container.scale, { x: 0, y: 0 }, 0.1, ease.inBack, () => {
           if (this.container.destroyed) return;
-          const parent = this.container.parent;
-          const p = { x: this.container.x, y: this.container.y };
-          this.manager.spawnFillEffect(parent, p.x, p.y);
           for (const ball of this._slottedBalls) {
             stopTweensOf(ball);
             stopTweensOf(ball.scale);
@@ -492,31 +489,18 @@ export class FillBoxManager {
     }
   }
 
-  // hit flash where a ball lands (the original's ParticleBallLitBeam prefab)
+  // The landing light (the original's ParticleBallLitBeam): a narrow
+  // vertical column over the ball, faded in and out.
   spawnHitEffect(parent, x, y, dur) {
     const fx = new Sprite(this.world.textures.beam);
     fx.anchor.set(0.5);
     fx.position.set(x, y);
-    fx.width = F().hitEffectSize;
-    fx.height = F().hitEffectSize;
+    fx.width = F().hitEffect.w;
+    fx.height = F().hitEffect.h;
     fx.alpha = 0;
     parent.addChild(fx);
     tweenTo(fx, { alpha: 1 }, dur, ease.sineOut, () =>
       tweenTo(fx, { alpha: 0 }, dur, ease.sineIn, () => fx.destroy()),
-    );
-  }
-
-  // full-box pop (the original's FillParticle prefab)
-  spawnFillEffect(parent, x, y) {
-    const fx = new Sprite(this.world.textures.shockwave);
-    fx.anchor.set(0.5);
-    fx.position.set(x, y);
-    fx.width = F().fillEffectSize;
-    fx.height = F().fillEffectSize;
-    fx.alpha = 0;
-    parent.addChild(fx);
-    tweenTo(fx, { alpha: 1 }, 0.3, ease.sineOut, () =>
-      tweenTo(fx, { alpha: 0 }, 0.3, ease.sineIn, () => fx.destroy()),
     );
   }
 }

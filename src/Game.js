@@ -270,7 +270,6 @@ async function loadTextures() {
     lightning: IMG("ParticleMultiplierLightningBlue.png"),
     boxTrayPink: IMG("box_tray_pink.png"),
     beam: IMG("ParticleBallLitBeam.png"),
-    shockwave: IMG("ParticleShockwaveSoft_SW.png"),
   };
   for (const c of ALL_COLORS) {
     entries[`ball_${c}`] = BALL_TEXTURES[c];
@@ -317,7 +316,6 @@ async function loadTextures() {
     multShadowPost: loaded[entries.multShadowPost],
     boxTrayPink: loaded[entries.boxTrayPink],
     beam: crop(loaded[entries.beam], 140, 28, 107, 258),
-    shockwave: loaded[entries.shockwave],
     ball: {},
     ballLit: {},
     boxBase: {},
