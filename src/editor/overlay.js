@@ -1,5 +1,4 @@
 import { Container, Graphics } from "pixi.js";
-import { DESIGN_W } from "../config.js";
 import { editableObjects, pickObject } from "./objects.js";
 
 const HANDLE = 13;
@@ -23,7 +22,7 @@ export class SelectionOverlay {
     this.game = game;
     this.onChange = onChange;
     this.onSelect = onSelect;
-    this.objects = editableObjects(() => this._viewport());
+    this.objects = editableObjects();
     this.selected = null;
     this.enabled = false;
 
@@ -68,19 +67,6 @@ export class SelectionOverlay {
 
   selectById(id) {
     this.select(this.objects.find((o) => o.id === id) ?? null);
-  }
-
-  // The visible rect in design coordinates — the same left/right edges the
-  // scene's fit() feeds to the corner-anchored widgets, derived here from the
-  // root transform so the two cannot drift apart.
-  _viewport() {
-    const root = this.game.getRoot();
-    if (!root || root.destroyed) return { left: 0, right: DESIGN_W };
-    const s = root.scale.x;
-    return {
-      left: -root.x / s,
-      right: (this.app.renderer.width - root.x) / s,
-    };
   }
 
   // Canvas coordinates -> design coordinates.

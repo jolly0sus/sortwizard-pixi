@@ -2,7 +2,7 @@
 // TutorialHand.ts (pointing glove with idle re-hints), the logo/CTA widgets,
 // and VictoryWindow.ts / FailWindow.ts.
 import { Container, Graphics, Sprite } from "pixi.js";
-import { DESIGN_H, LAYOUT, WINDOWS } from "./config.js";
+import { DESIGN_H, DESIGN_W, LAYOUT, WINDOWS } from "./config.js";
 import { audio } from "./audio.js";
 import { tweenTo, ease, delay, stopTweensOf } from "./tween.js";
 
@@ -190,7 +190,18 @@ export class TutorialHand {
 }
 
 // ---------------------------------------------------------------------------
-// Logo + CTA (widget-anchored to the visible rect; Game re-lays them on fit)
+// Logo + CTA
+//
+// These used to hang off the corners of the *visible* rect, which is what the
+// original does: on a wide screen they drift out into the purple margins and
+// stay in the viewer's corners. That only works while they live near those
+// corners. Placed under the board instead, the same anchoring put them a
+// screen-width away from it on a phone, where the visible rect is the design
+// rect — off-screen entirely, CTA included.
+//
+// So the insets are measured from the design rect now. The board always fills
+// the height and the design width is always visible, which makes this the only
+// anchoring that is guaranteed to keep them on screen at every aspect ratio.
 // ---------------------------------------------------------------------------
 export function buildLogo(layer, textures) {
   const L = LAYOUT.ui.logo;
@@ -199,8 +210,8 @@ export function buildLogo(layer, textures) {
   logo.width = L.w;
   logo.height = L.h;
   layer.addChild(logo);
-  logo.layoutWidget = (left) => {
-    logo.position.set(left + L.left + L.w / 2, DESIGN_H - L.bottom - L.h / 2);
+  logo.layoutWidget = () => {
+    logo.position.set(L.left + L.w / 2, DESIGN_H - L.bottom - L.h / 2);
   };
   return logo;
 }
@@ -217,8 +228,11 @@ export function buildCTA(layer, textures, { onClick } = {}) {
   cta.cursor = "pointer";
   cta.on("pointertap", () => onClick?.());
   layer.addChild(cta);
-  cta.layoutWidget = (left, right) => {
-    cta.position.set(right - C.right - C.w / 2, DESIGN_H - C.bottom - C.h / 2);
+  cta.layoutWidget = () => {
+    cta.position.set(
+      DESIGN_W - C.right - C.w / 2,
+      DESIGN_H - C.bottom - C.h / 2,
+    );
   };
 
   let revealed = false;
@@ -335,8 +349,27 @@ export function buildFailWindow(layer, textures, world) {
   win.visible = false;
   layer.addChild(win);
 
-  // The original FailWindow has no visible backdrop (its Dark sprite has no
-  // frame assigned) and its CTA node is inactive — just the FAIL badge.
+  // The original FailWindow has no visible backdrop — its Dark sprite has no
+  // frame assigned — and its CTA node is inactive; it is just the FAIL badge.
+  // A lit board behind that badge still reads as a game in progress, so this
+  // one dims, on the victory window's constants so the two losses and wins
+  // feel like the same product.
+  //
+  // Unlike the victory backdrop, which is a fixed 920x1480 box straight from
+  // the original, this one is redrawn to the visible rect: a design-sized
+  // rectangle would leave the purple margins of a wide screen undimmed.
+  const dark = new Graphics();
+  dark.alpha = 0;
+  dark.eventMode = "static"; // swallow touches, as the victory backdrop does
+  win.addChild(dark);
+  win.layoutWidget = (left, right) => {
+    dark
+      .clear()
+      .rect(left, 0, right - left, DESIGN_H)
+      .fill(0x000000);
+  };
+  win.layoutWidget(0, DESIGN_W);
+
   const badge = new Sprite(textures.failButton);
   badge.anchor.set(0.5);
   badge.position.set(375, F.badge.y);
@@ -348,9 +381,16 @@ export function buildFailWindow(layer, textures, world) {
 
   win.show = () => {
     win.visible = true;
+    dark.alpha = 0;
     badge.scale.set(0);
     audio.playFail();
     world.tutorialHand?.pointAtCTA(null);
+    tweenTo(
+      dark,
+      { alpha: WINDOWS.backdropOpacity },
+      WINDOWS.backdropFadeDuration,
+      ease.sineInOut,
+    );
     delay(0.5 * WINDOWS.backdropFadeDuration + WINDOWS.popInDelay, () => {
       tweenTo(badge.scale, badgeScale, WINDOWS.popInDuration, ease.bounceOut);
     });

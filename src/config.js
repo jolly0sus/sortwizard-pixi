@@ -314,14 +314,15 @@ export const LAYOUT = {
     // widget-anchored to the visible rect (insets in design px)
     // The four insets below are the one place in this file that is eyeballed
     // rather than converted: they were dragged in the scene editor and are
-    // design px as they came out of it, not the original's numbers.
+    // design px as they came out of it, not the original's numbers. They are
+    // measured from the design rect — see the anchoring note in ui.js.
     logo: {
       w: us(1425 * 0.15),
       h: us(800 * 0.15),
-      left: 1109.91,
+      left: 41.35,
       bottom: 36.5,
     },
-    cta: { w: us(300), h: us(90), right: 1107.99, bottom: 61.39 },
+    cta: { w: us(300), h: us(90), right: 39.43, bottom: 61.39 },
     victory: {
       darkW: us(920),
       darkH: us(1480),

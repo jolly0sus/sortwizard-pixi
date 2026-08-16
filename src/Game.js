@@ -169,9 +169,10 @@ function buildScene(app, textures) {
   sourceBoxManager.tapCounter = tapCounter;
   sourceBoxManager.tutorialHand = tutorialHand;
 
-  // Fixed-height fit, like the original: the board always fills the height;
-  // wider screens see more purple, and the logo/CTA stay glued to the visible
-  // corners.
+  // Fixed-height fit, like the original: the board always fills the height and
+  // wider screens see more purple. The logo and the CTA sit in design space
+  // now, so only the fail backdrop still needs the visible edges — it has to
+  // reach past the board to dim that purple too.
   const fit = () => {
     const w = app.renderer.width;
     const h = app.renderer.height;
@@ -181,8 +182,9 @@ function buildScene(app, textures) {
     stageRoot.y = 0;
     const left = 375 - w / scale / 2;
     const right = 375 + w / scale / 2;
-    logo.layoutWidget(left, right);
-    cta.layoutWidget(left, right);
+    logo.layoutWidget();
+    cta.layoutWidget();
+    world.failWindow.layoutWidget(left, right);
   };
   fit();
 

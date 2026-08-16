@@ -54,16 +54,11 @@ function centred(id, label, node, extraFields = []) {
   };
 }
 
-// The logo and the CTA are the only things on screen that are not placed in
-// design space: they hang off the corners of the *visible* rect, so the same
-// LAYOUT numbers land somewhere different on every aspect ratio. That is why
-// this one needs `viewport` — rect() has to ask which edges the scene is using
-// right now, and setRect() writes an inset from that edge rather than an
-// absolute x, which is what keeps the widget glued to its corner afterwards.
-//
-// `edge` is "left" or "right"; both are measured inwards, and both sit above
-// the bottom of the design rect by `bottom`.
-function cornerWidget(id, label, node, edge, viewport) {
+// The logo and the CTA are described by insets from the edges of the design
+// rect rather than by a centre, so they keep their margins instead of their
+// coordinates. `edge` picks which side the horizontal inset is measured from;
+// both sit above the bottom of the design rect by `bottom`.
+function cornerWidget(id, label, node, edge) {
   return {
     id,
     label,
@@ -72,9 +67,8 @@ function cornerWidget(id, label, node, edge, viewport) {
     fields: [`ui.${id}.${edge}`, `ui.${id}.bottom`, `ui.${id}.w`, `ui.${id}.h`],
     rect: () => {
       const n = node();
-      const v = viewport();
       return {
-        x: edge === "left" ? v.left + n.left : v.right - n.right - n.w,
+        x: edge === "left" ? n.left : DESIGN_W - n.right - n.w,
         y: DESIGN_H - n.bottom - n.h,
         w: n.w,
         h: n.h,
@@ -82,9 +76,8 @@ function cornerWidget(id, label, node, edge, viewport) {
     },
     setRect: (r) => {
       const n = node();
-      const v = viewport();
-      if (edge === "left") n.left = keep(r.x - v.left, n.left);
-      else n.right = keep(v.right - (r.x + r.w), n.right);
+      if (edge === "left") n.left = keep(r.x, n.left);
+      else n.right = keep(DESIGN_W - (r.x + r.w), n.right);
       n.bottom = keep(DESIGN_H - (r.y + r.h), n.bottom);
       n.w = keep(r.w, n.w);
       n.h = keep(r.h, n.h);
@@ -92,23 +85,12 @@ function cornerWidget(id, label, node, edge, viewport) {
   };
 }
 
-// `viewport()` returns the visible rect's left and right edges in design
-// coordinates. It defaults to the design rect itself so the function stays
-// callable without a live scene (tests, console pokes).
-export function editableObjects(
-  viewport = () => ({ left: 0, right: DESIGN_W }),
-) {
+export function editableObjects() {
   const L = LAYOUT;
 
   return [
-    cornerWidget(
-      "logo",
-      "Логотип SortWizard",
-      () => L.ui.logo,
-      "left",
-      viewport,
-    ),
-    cornerWidget("cta", "Кнопка Play now", () => L.ui.cta, "right", viewport),
+    cornerWidget("logo", "Логотип SortWizard", () => L.ui.logo, "left"),
+    cornerWidget("cta", "Кнопка Play now", () => L.ui.cta, "right"),
     centred("wood", "Доска (дерево)", () => L.wood),
     centred("frame", "Рамка", () => L.frame),
     {
