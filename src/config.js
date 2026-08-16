@@ -312,13 +312,16 @@ export const LAYOUT = {
 
   ui: {
     // widget-anchored to the visible rect (insets in design px)
+    // The four insets below are the one place in this file that is eyeballed
+    // rather than converted: they were dragged in the scene editor and are
+    // design px as they came out of it, not the original's numbers.
     logo: {
       w: us(1425 * 0.15),
       h: us(800 * 0.15),
-      left: us(17.798),
-      bottom: us(23.465),
+      left: 1109.91,
+      bottom: 36.5,
     },
-    cta: { w: us(300), h: us(90), right: us(14.474), bottom: us(36.217) },
+    cta: { w: us(300), h: us(90), right: 1107.99, bottom: 61.39 },
     victory: {
       darkW: us(920),
       darkH: us(1480),
