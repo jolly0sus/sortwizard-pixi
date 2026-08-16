@@ -75,6 +75,11 @@ export const ECONOMY = {
   // screen — enough for a tray already swallowing a ball to finish and open
   // the next one, which can unlock the board after all.
   outOfBallsGrace: 1.5,
+  // Backstop for the case the colour test cannot see: a ball that matches an
+  // open tray but can never reach it, resting on the floor below the belt
+  // where nothing picks it up. It reads as progress still being possible, so
+  // without a limit on going nowhere the run would wait on it forever.
+  outOfBallsStall: 6,
 };
 
 // ---------------------------------------------------------------------------

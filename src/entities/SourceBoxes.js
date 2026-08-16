@@ -9,7 +9,7 @@ import { Container, Sprite, Text } from "pixi.js";
 import { LAYOUT, ECONOMY } from "../config.js";
 import { Ball } from "./Ball.js";
 import { audio } from "../audio.js";
-import { tweenTo, ease, delay } from "../tween.js";
+import { tweenTo, ease, delay, stopTweensOf } from "../tween.js";
 
 const B = () => LAYOUT.sourceBox;
 
@@ -125,7 +125,12 @@ class Box {
   }
 
   _onTouched() {
+    // Taps still count towards the store redirect after the run is decided,
+    // but they must not put balls back on a board that has just been cleared.
+    // The ending backdrop swallows real taps, so this only catches one already
+    // on its way — and anything driving a box directly.
     this.manager.tapCounter?.registerTap();
+    if (this.manager.isRunOver()) return;
     if (this.isAnimating || this.ballsLaunched > 0 || !this.alive) return;
     if (this.manager.canLaunchBalls()) {
       audio.playBoxTap();
@@ -239,6 +244,8 @@ export class SourceBoxManager {
     this._allBoxesFilled = false;
     this._failCheckTimer = 0;
     this._idleTimer = 0;
+    this._stallTimer = 0;
+    this._lastUnsorted = -1;
   }
 
   // Balls that do not exist yet: what the standing boxes still hold plus every
@@ -294,6 +301,10 @@ export class SourceBoxManager {
     this.pipeLabels[this._pipeForSlot(slot)].text = String(
       this.pipeCharges[slot],
     );
+  }
+
+  isRunOver() {
+    return this._failTriggered || this._victoryTriggered;
   }
 
   canLaunchBalls() {
@@ -357,8 +368,33 @@ export class SourceBoxManager {
   // first: rows the run can no longer touch, sitting under the ending screen,
   // read as a game still waiting to be played.
   _endRun(win) {
+    this._sweepBalls();
     this.world.fillBoxManager.clearAll();
     win.show();
+  }
+
+  // Nothing is left rolling under the ending screen. Balls that never made it
+  // into a tray — riding the belt, mid-fall, or resting on the floor below it
+  // where nothing could ever pick them up — shrink away with the grid.
+  //
+  // Balls a tray already holds are skipped: they belong to that tray and go
+  // when it does, and despawning them twice would hand the same ball out of
+  // the pool to two spawns.
+  _sweepBalls() {
+    for (const cell of this.world.conveyor.cells) cell.forceTakeBall();
+    let n = 0;
+    for (const ball of [...Ball.all]) {
+      if (ball.destroyed || ball.takenByBox) continue;
+      ball.physicsActive = false;
+      stopTweensOf(ball);
+      stopTweensOf(ball.scale);
+      delay(0.015 * n++, () => {
+        if (ball.destroyed) return;
+        tweenTo(ball.scale, { x: 0, y: 0 }, 0.16, ease.inBack, () => {
+          if (!ball.destroyed) this.world.despawnBall(ball);
+        });
+      });
+    }
   }
 
   // Nothing new enters the board once the pipes are dry, so the run lives or
@@ -375,17 +411,38 @@ export class SourceBoxManager {
     if (this._failTriggered || this._victoryTriggered) return;
     if (this.ballsPending() > 0) {
       this._idleTimer = 0;
+      this._stallTimer = 0;
+      this._lastUnsorted = -1;
       return;
     }
+
+    // Going nowhere, whatever the board looks like. Not every ball that
+    // matches an open tray can actually get to one: a ball that missed the
+    // belt comes to rest on the floor below it, where nothing ever picks it
+    // up, and the colour test below reads it as a run still in progress.
+    const unsorted = Ball.getUnsortedCount();
+    if (unsorted !== this._lastUnsorted) {
+      this._lastUnsorted = unsorted;
+      this._stallTimer = 0;
+    } else {
+      this._stallTimer += dt;
+    }
+
     const open = this.world.fillBoxManager.getOpenBoxColors();
+    let reachable = false;
     for (const color of Ball.getUnsortedColors()) {
       if (open.has(color)) {
-        this._idleTimer = 0;
-        return;
+        reachable = true;
+        break;
       }
     }
-    this._idleTimer += dt;
-    if (this._idleTimer < ECONOMY.outOfBallsGrace) return;
+    this._idleTimer = reachable ? 0 : this._idleTimer + dt;
+
+    if (
+      this._idleTimer < ECONOMY.outOfBallsGrace &&
+      this._stallTimer < ECONOMY.outOfBallsStall
+    )
+      return;
     // Using the supply up is finishing the level, so this is the win.
     //
     // It has to be, or the level cannot be completed at all. Trays are only
