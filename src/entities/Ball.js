@@ -214,6 +214,14 @@ export class Ball extends Container {
     return n;
   }
 
+  static getUnsortedColors() {
+    const out = new Set();
+    for (const b of Ball.all) {
+      if (!b.destroyed && !b.takenByBox) out.add(b.color);
+    }
+    return out;
+  }
+
   static spawn(textures, parent) {
     const ball = Ball.pool.pop() ?? new Ball(textures);
     ball.reset();

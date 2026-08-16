@@ -283,7 +283,6 @@ class FillBox {
     );
     this.manager.spawnHitEffect(this.container.parent, p.x, p.y, 0.18);
     audio.playBallInBox();
-    this.manager.ballsSorted++;
     this._landedCount++;
     if (this._landedCount >= this.slots.length) this._onFilled();
   }
@@ -334,6 +333,32 @@ class FillBox {
     );
   }
 
+  // Leaves the board without being filled, for when the run is over. Unlike
+  // _disappear this counts for nothing: onBoxFilled is dropped first so a tray
+  // swept off at the end is not recorded as one the player completed.
+  clearAway(after) {
+    if (this.container.destroyed) return;
+    this.onBoxFilled = null;
+    this.onBoxReserved = null;
+    this._isOpen = false;
+    this._busy = true;
+    stopTweensOf(this.container);
+    stopTweensOf(this.container.scale);
+    delay(after, () => {
+      if (this.container.destroyed) return;
+      tweenTo(this.container.scale, { x: 0, y: 0 }, 0.18, ease.inBack, () => {
+        if (this.container.destroyed) return;
+        for (const ball of this._slottedBalls) {
+          stopTweensOf(ball);
+          stopTweensOf(ball.scale);
+          this.world.despawnBall(ball);
+        }
+        this._slottedBalls.length = 0;
+        this.container.destroy({ children: true });
+      });
+    });
+  }
+
   _disappear() {
     if (this.container.destroyed) return;
     tweenTo(
@@ -365,6 +390,7 @@ export class FillBoxManager {
     const f = F();
 
     // static "socket" sprites at every anchor, under the boxes
+    this.sockets = [];
     for (const y of f.rowYs) {
       for (const x of f.xs) {
         const socket = new Sprite(world.textures.boxBase[COLORS.BLUE]);
@@ -373,6 +399,7 @@ export class FillBoxManager {
         socket.width = f.base.w;
         socket.height = f.base.h;
         world.fillLayer.addChild(socket);
+        this.sockets.push(socket);
       }
     }
 
@@ -380,7 +407,6 @@ export class FillBoxManager {
     this.columnBusy = [false, false, false, false];
     this.colConsumed = [0, 0, 0, 0];
     this.totalFilled = 0;
-    this.ballsSorted = 0;
     this.onAllBoxesFilled = null;
     this._queue = [];
 
@@ -501,6 +527,24 @@ export class FillBoxManager {
     if (ECONOMY.maxCycles <= 0) return;
     const needed = ECONOMY.maxCycles * ECONOMY.rowColorSequence.length * 4;
     if (this.totalFilled >= needed) this.onAllBoxesFilled?.();
+  }
+
+  // Takes the whole receiver grid off the board once the run is decided. The
+  // trays pop away column by column and the empty sockets underneath fade with
+  // them — leaving those behind would still read as a board waiting to be
+  // played, which is the one thing the ending screen must not say.
+  clearAll() {
+    if (this._cleared) return;
+    this._cleared = true;
+    let n = 0;
+    for (const column of this.columns) {
+      for (const box of column) box.clearAway(0.035 * n++);
+      column.length = 0;
+    }
+    for (const socket of this.sockets) {
+      if (socket.destroyed) continue;
+      tweenTo(socket, { alpha: 0 }, 0.3, ease.sineIn);
+    }
   }
 
   getOpenBoxColors() {

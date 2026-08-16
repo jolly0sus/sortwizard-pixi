@@ -239,7 +239,6 @@ export class SourceBoxManager {
     this._allBoxesFilled = false;
     this._failCheckTimer = 0;
     this._idleTimer = 0;
-    this._sortedSeen = 0;
   }
 
   // Balls that do not exist yet: what the standing boxes still hold plus every
@@ -351,37 +350,46 @@ export class SourceBoxManager {
     // still riding around.
     if (Ball.getUnsortedCount() < Ball.getTotalBallCount()) return;
     this._victoryTriggered = true;
-    this.world.victoryWindow.show();
+    this._endRun(this.world.victoryWindow);
   }
 
-  // Nothing new enters the board once the pipes are dry, so from then on the
-  // run can only advance while trays keep taking the balls that are left. When
-  // that stops the leftovers are colours no reachable tray wants, and the
-  // level is over.
+  // Every ending goes through here. The receiver grid comes off the board
+  // first: rows the run can no longer touch, sitting under the ending screen,
+  // read as a game still waiting to be played.
+  _endRun(win) {
+    this.world.fillBoxManager.clearAll();
+    win.show();
+  }
+
+  // Nothing new enters the board once the pipes are dry, so the run lives or
+  // dies on the balls already out. It can still advance as long as one of them
+  // matches a tray that is open right now; if none does, no front tray can
+  // fill, so nothing behind it can ever open either and the board is locked
+  // whatever the balls do next. That is the same deadlock _checkFail looks
+  // for, minus its requirement that the belt be full — with the pipes dry a
+  // half-empty belt is just as final.
   //
-  // This is a stall timer rather than a colour test on purpose: a tray several
-  // rows back can only ever open if the ones in front of it fill first, so
-  // whether a leftover ball has a future is not something a snapshot of the
-  // board can answer. Balls still falling keep it reset — they have not had
-  // their chance yet.
+  // The short delay covers the one way out: a tray already swallowing a ball
+  // can finish and open the next one, which may take a colour that is waiting.
   _checkEndOfSupply(dt) {
     if (this._failTriggered || this._victoryTriggered) return;
     if (this.ballsPending() > 0) {
       this._idleTimer = 0;
       return;
     }
-    const sorted = this.world.fillBoxManager.ballsSorted;
-    if (sorted !== this._sortedSeen || Ball.getFreeBallCount() > 0) {
-      this._sortedSeen = sorted;
-      this._idleTimer = 0;
-      return;
+    const open = this.world.fillBoxManager.getOpenBoxColors();
+    for (const color of Ball.getUnsortedColors()) {
+      if (open.has(color)) {
+        this._idleTimer = 0;
+        return;
+      }
     }
     this._idleTimer += dt;
     if (this._idleTimer < ECONOMY.outOfBallsGrace) return;
     this._checkVictory();
     if (this._victoryTriggered) return;
     this._failTriggered = true;
-    this.world.failWindow.show();
+    this._endRun(this.world.failWindow);
   }
 
   // Fail: the belt is completely full and none of the colours riding it can
@@ -401,6 +409,6 @@ export class SourceBoxManager {
       if (open.has(c)) return;
     }
     this._failTriggered = true;
-    this.world.failWindow.show();
+    this._endRun(this.world.failWindow);
   }
 }
