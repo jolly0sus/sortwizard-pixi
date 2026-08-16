@@ -386,16 +386,29 @@ export class SourceBoxManager {
     }
     this._idleTimer += dt;
     if (this._idleTimer < ECONOMY.outOfBallsGrace) return;
-    this._checkVictory();
-    if (this._victoryTriggered) return;
-    this._failTriggered = true;
-    this._endRun(this.world.failWindow);
+    // Using the supply up is finishing the level, so this is the win.
+    //
+    // It has to be, or the level cannot be completed at all. Trays are only
+    // added while the balls left outnumber the slots already waiting, so from
+    // the moment that stops there are at least as many slots as balls, and
+    // sorting takes one of each. The grid therefore still has slots open when
+    // the last ball is gone unless the two matched exactly and every leftover
+    // ball found its colour — which is a knife's edge, not a level. Scoring
+    // this as a loss made every possible run a loss.
+    this._victoryTriggered = true;
+    this._endRun(this.world.victoryWindow);
   }
 
   // Fail: the belt is completely full and none of the colours riding it can
   // go into any currently open receiver box.
   _checkFail() {
     if (this._failTriggered || this._victoryTriggered) return;
+    // Only a jam the player can still be rescued from is a loss. Once the
+    // pipes are dry there is no rescue and no next move to spoil: the board
+    // locking up is simply how the level ends, and _checkEndOfSupply owns it.
+    // Without this the endgame was a race the player always lost — draining
+    // columns leave fewer open colours, which is exactly what fills the belt.
+    if (this.ballsPending() === 0) return;
     const conveyor = this.world.conveyor;
     if (!conveyor.cells.length) return;
     if (!conveyor.isFull()) return;
