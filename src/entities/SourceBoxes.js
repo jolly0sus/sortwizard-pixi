@@ -225,6 +225,9 @@ class Box {
     for (let d = 0; d < total; d++) {
       delay(0.08 * d, () => {
         if (this.container.destroyed) return;
+        // a launch in flight when the run ends must not drip fresh balls
+        // onto the board the ending sweep has just cleared
+        if (this.manager.isRunOver()) return;
         const ball = Ball.spawn(this.world.textures, this.world.ballLayer);
         ball.setColor(this.color);
         ball.initPhysics();
@@ -283,6 +286,7 @@ export class SourceBoxManager {
     this._idleTimer = 0;
     this._stallTimer = 0;
     this._lastUnsorted = -1;
+    this._overflowTimer = 0;
   }
 
   // Balls that do not exist yet: what the standing boxes still hold plus every
@@ -385,7 +389,34 @@ export class SourceBoxManager {
       this._checkFail();
       this._checkVictory();
     }
+    this._checkOverflow(dt);
     this._checkEndOfSupply(dt);
+  }
+
+  // The loss that is actually reachable: drowning the board. Every colour
+  // always has an open tray (one-colour columns), so the belt always drains
+  // and the old jam cannot happen — but a player who keeps tapping into a
+  // saturated board buries it faster than it can drain. A heap of
+  // overflowFreeBalls loose balls that refuses to shrink for overflowSeconds
+  // is that player, not a slow patch: bursts decay through the threshold in
+  // seconds (see the sizing note in config.js).
+  //
+  // Skipped once the pipes are dry — the endgame always resolves by sorting
+  // or by the stall backstop, and losing on the last boxes' splash when the
+  // win is already inevitable would be pure spite.
+  _checkOverflow(dt) {
+    if (this.ballsPending() === 0) {
+      this._overflowTimer = 0;
+      return;
+    }
+    if (Ball.getFreeBallCount() < ECONOMY.overflowFreeBalls) {
+      this._overflowTimer = 0;
+      return;
+    }
+    this._overflowTimer += dt;
+    if (this._overflowTimer < ECONOMY.overflowSeconds) return;
+    this._failTriggered = true;
+    this._endRun(this.world.failWindow);
   }
 
   _checkVictory() {

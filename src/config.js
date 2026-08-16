@@ -47,8 +47,26 @@ export const ECONOMY = {
   // the pipe. Decrements when an emptied box finishes disappearing.
   pipeCharges: [7, 7, 7],
   // While this many balls are loose on the board (not riding the belt, not in
-  // a tray), taps are refused and the box shakes.
-  maxFreeBalls: 27,
+  // a tray), taps are refused and the box shakes. Two boxes' worth after the
+  // multipliers: high enough that a player CAN over-commit — the original's 27
+  // blocked the second tap outright, which paced even blind spam into a win
+  // and made the run unlosable.
+  maxFreeBalls: 54,
+  // The loss: drowning the board. With every colour always having an open
+  // tray (see trayColumnColors), the belt always drains, so a jam can no
+  // longer kill the run — flooding it can. A heap of this many loose balls
+  // that refuses to shrink for this long is a player who kept tapping into a
+  // board with nowhere to put anything. The heap alone is the signal: a
+  // belt-full test was tried first and never held, because trays constantly
+  // pull balls off the belt and the freed cell rides empty to the capture
+  // zone, blinking the condition off.
+  //
+  // Numbers sized against the measured drain of ~4.5 balls/s: one tap tops
+  // out near 53 loose and even a second tap at ~74 decays through 45 in
+  // about 7 s, so bursts survive; only sustained spam pins the heap above
+  // the threshold for the full 8 s.
+  overflowFreeBalls: 45,
+  overflowSeconds: 8,
 
   // --- the run's economy, balanced colour by colour ------------------------
   //
