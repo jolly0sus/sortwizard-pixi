@@ -203,6 +203,17 @@ export class Ball extends Container {
     return Ball.all.size;
   }
 
+  // Balls a tray has not claimed yet — the ones still worth building trays
+  // for. A claimed ball keeps existing until its tray pops, so counting
+  // Ball.all instead would keep the supply looking bigger than it is.
+  static getUnsortedCount() {
+    let n = 0;
+    for (const b of Ball.all) {
+      if (!b.destroyed && !b.takenByBox) n++;
+    }
+    return n;
+  }
+
   static spawn(textures, parent) {
     const ball = Ball.pool.pop() ?? new Ball(textures);
     ball.reset();

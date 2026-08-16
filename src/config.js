@@ -71,6 +71,10 @@ export const ECONOMY = {
   // balls can ever fill, so in practice the run ends by fail or by the pipes
   // running dry.
   maxCycles: 9,
+  // Once the pipes are dry the run can only advance while trays keep taking
+  // balls. This many seconds without a single one landing means the leftovers
+  // have nowhere left to go and the level is over.
+  outOfBallsGrace: 3,
 };
 
 // ---------------------------------------------------------------------------

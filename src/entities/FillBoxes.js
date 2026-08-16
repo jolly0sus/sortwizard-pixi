@@ -91,6 +91,10 @@ class FillBox {
     return this._filledCount >= this.slots.length;
   }
 
+  get openSlots() {
+    return Math.max(0, this.slots.length - this._filledCount);
+  }
+
   setClosed() {
     this._isOpen = false;
     this.lid.visible = true;
@@ -279,6 +283,7 @@ class FillBox {
     );
     this.manager.spawnHitEffect(this.container.parent, p.x, p.y, 0.18);
     audio.playBallInBox();
+    this.manager.ballsSorted++;
     this._landedCount++;
     if (this._landedCount >= this.slots.length) this._onFilled();
   }
@@ -375,6 +380,7 @@ export class FillBoxManager {
     this.columnBusy = [false, false, false, false];
     this.colConsumed = [0, 0, 0, 0];
     this.totalFilled = 0;
+    this.ballsSorted = 0;
     this.onAllBoxesFilled = null;
     this._queue = [];
 
@@ -428,7 +434,7 @@ export class FillBoxManager {
 
     const rowIndex = this._nextRowIndex + this.colConsumed[col];
     this.colConsumed[col]++;
-    const newBox = this._createBox(col, rowIndex);
+    const newBox = this._canAddBox() ? this._createBox(col, rowIndex) : null;
     if (newBox) {
       newBox.setClosed();
       newBox.container.position.set(
@@ -459,7 +465,39 @@ export class FillBoxManager {
     if (pending === 0) this.columnBusy[col] = false;
   }
 
+  // Slots the trays currently on the board are still waiting to be given.
+  openSlotsRemaining() {
+    let slots = 0;
+    for (const column of this.columns) {
+      for (const box of column) {
+        if (!box.container.destroyed) slots += box.openSlots;
+      }
+    }
+    return slots;
+  }
+
+  // A column only tops itself up while the balls left to sort — those in play
+  // plus those the pipes have not delivered yet — could fill more than the
+  // trays already standing. maxCycles alone cannot do this: its 216 trays are
+  // 648 slots, which the 216 balls only reach if every single one is tripled
+  // on a multiplier bar, so any real run left rows on the board that nothing
+  // could ever fill and the level simply never ended. Asking the ball supply
+  // instead makes the grid drain exactly as the balls do, and it self-corrects
+  // — using the multipliers creates balls, which brings more trays with them.
+  _canAddBox() {
+    const source = this.world.sourceBoxManager;
+    if (!source) return true;
+    const supply = source.ballsPending() + Ball.getUnsortedCount();
+    return supply > this.openSlotsRemaining();
+  }
+
   _checkAllFilled() {
+    // Draining every column is a win in its own right now: the grid can empty
+    // before the original's fixed quota is anywhere near reached.
+    if (this.columns.every((column) => column.length === 0)) {
+      this.onAllBoxesFilled?.();
+      return;
+    }
     if (ECONOMY.maxCycles <= 0) return;
     const needed = ECONOMY.maxCycles * ECONOMY.rowColorSequence.length * 4;
     if (this.totalFilled >= needed) this.onAllBoxesFilled?.();

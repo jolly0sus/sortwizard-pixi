@@ -238,6 +238,22 @@ export class SourceBoxManager {
     this._victoryTriggered = false;
     this._allBoxesFilled = false;
     this._failCheckTimer = 0;
+    this._idleTimer = 0;
+    this._sortedSeen = 0;
+  }
+
+  // Balls that do not exist yet: what the standing boxes still hold plus every
+  // box the pipes can still deliver. Balls already launched are in Ball.all
+  // instead, so the two counts never overlap.
+  ballsPending() {
+    let n = 0;
+    for (const box of this.boxes) {
+      if (box.alive || box.isAnimating) {
+        n += Math.max(0, ECONOMY.ballsPerBox - box.ballsLaunched);
+      }
+    }
+    for (const charge of this.pipeCharges) n += charge * ECONOMY.ballsPerBox;
+    return n;
   }
 
   _buildPipes() {
@@ -323,14 +339,49 @@ export class SourceBoxManager {
       this._checkFail();
       this._checkVictory();
     }
+    this._checkEndOfSupply(dt);
   }
 
   _checkVictory() {
     if (!this._allBoxesFilled) return;
-    if (Ball.getTotalBallCount() > 0) return;
     if (this._victoryTriggered || this._failTriggered) return;
+    // Balls a tray is still swallowing hold the win back; leftovers loose on
+    // the belt do not. Waiting for the board to empty outright, as this used
+    // to, would hang the win forever now that the grid can drain with balls
+    // still riding around.
+    if (Ball.getUnsortedCount() < Ball.getTotalBallCount()) return;
     this._victoryTriggered = true;
     this.world.victoryWindow.show();
+  }
+
+  // Nothing new enters the board once the pipes are dry, so from then on the
+  // run can only advance while trays keep taking the balls that are left. When
+  // that stops the leftovers are colours no reachable tray wants, and the
+  // level is over.
+  //
+  // This is a stall timer rather than a colour test on purpose: a tray several
+  // rows back can only ever open if the ones in front of it fill first, so
+  // whether a leftover ball has a future is not something a snapshot of the
+  // board can answer. Balls still falling keep it reset — they have not had
+  // their chance yet.
+  _checkEndOfSupply(dt) {
+    if (this._failTriggered || this._victoryTriggered) return;
+    if (this.ballsPending() > 0) {
+      this._idleTimer = 0;
+      return;
+    }
+    const sorted = this.world.fillBoxManager.ballsSorted;
+    if (sorted !== this._sortedSeen || Ball.getFreeBallCount() > 0) {
+      this._sortedSeen = sorted;
+      this._idleTimer = 0;
+      return;
+    }
+    this._idleTimer += dt;
+    if (this._idleTimer < ECONOMY.outOfBallsGrace) return;
+    this._checkVictory();
+    if (this._victoryTriggered) return;
+    this._failTriggered = true;
+    this.world.failWindow.show();
   }
 
   // Fail: the belt is completely full and none of the colours riding it can
