@@ -389,19 +389,10 @@ export class FillBoxManager {
     this.world = world;
     const f = F();
 
-    // static "socket" sprites at every anchor, under the boxes
-    this.sockets = [];
-    for (const y of f.rowYs) {
-      for (const x of f.xs) {
-        const socket = new Sprite(world.textures.boxBase[COLORS.BLUE]);
-        socket.anchor.set(0.5);
-        socket.position.set(x, y);
-        socket.width = f.base.w;
-        socket.height = f.base.h;
-        world.fillLayer.addChild(socket);
-        this.sockets.push(socket);
-      }
-    }
+    // No "socket" sprites under the anchors. A tray covers its anchor exactly,
+    // so a base drawn underneath is only ever visible where a tray is missing
+    // — a column that has run out, or the half-second a row is mid-shift — and
+    // the original leaves bare board there, not a ghost of a tray.
 
     this.columns = [[], [], [], []];
     this.columnBusy = [false, false, false, false];
@@ -529,10 +520,9 @@ export class FillBoxManager {
     if (this.totalFilled >= needed) this.onAllBoxesFilled?.();
   }
 
-  // Takes the whole receiver grid off the board once the run is decided. The
-  // trays pop away column by column and the empty sockets underneath fade with
-  // them — leaving those behind would still read as a board waiting to be
-  // played, which is the one thing the ending screen must not say.
+  // Takes the whole receiver grid off the board once the run is decided:
+  // rows the run can no longer touch, sitting under the ending screen, read as
+  // a board still waiting to be played.
   clearAll() {
     if (this._cleared) return;
     this._cleared = true;
@@ -540,10 +530,6 @@ export class FillBoxManager {
     for (const column of this.columns) {
       for (const box of column) box.clearAway(0.035 * n++);
       column.length = 0;
-    }
-    for (const socket of this.sockets) {
-      if (socket.destroyed) continue;
-      tweenTo(socket, { alpha: 0 }, 0.3, ease.sineIn);
     }
   }
 
