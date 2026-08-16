@@ -490,10 +490,11 @@ export class FillBoxManager {
   }
 
   // The landing light (the original's ParticleBallLitBeam): a narrow
-  // vertical column over the ball, faded in and out.
+  // vertical column rising from the ball, up past the tray's edge — the
+  // anchor sits low so most of the beam stands above the ball.
   spawnHitEffect(parent, x, y, dur) {
     const fx = new Sprite(this.world.textures.beam);
-    fx.anchor.set(0.5);
+    fx.anchor.set(0.5, 0.8);
     fx.position.set(x, y);
     fx.width = F().hitEffect.w;
     fx.height = F().hitEffect.h;

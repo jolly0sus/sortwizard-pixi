@@ -307,7 +307,7 @@ export const LAYOUT = {
     rise: ls(40),
     // the landing light: a narrow vertical column, ball-wide (the original's
     // ParticleBallLitBeam), never a square blob
-    hitEffect: { w: ls(44), h: ls(106) },
+    hitEffect: { w: ls(50), h: ls(112) },
   },
 
   ui: {
