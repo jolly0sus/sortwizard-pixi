@@ -38,16 +38,15 @@ class FillBox {
     this.base.height = f.base.h;
     container.addChild(this.base);
 
-    // The pink prefab carries an extra deep-wells overlay. It is built for
-    // every colour and simply hidden, so a tray can change colour later
-    // without rebuilding its children in the right z-order.
-    this.trayPink = new Sprite(t.boxTrayPink);
-    this.trayPink.anchor.set(0.5);
-    this.trayPink.position.set(0, f.trayPink.dy);
-    this.trayPink.width = f.trayPink.w;
-    this.trayPink.height = f.trayPink.h;
-    this.trayPink.visible = color === COLORS.PINK;
-    container.addChild(this.trayPink);
+    // the pink prefab carries an extra deep-wells overlay
+    if (color === COLORS.PINK) {
+      const tray = new Sprite(t.boxTrayPink);
+      tray.anchor.set(0.5);
+      tray.position.set(0, f.trayPink.dy);
+      tray.width = f.trayPink.w;
+      tray.height = f.trayPink.h;
+      container.addChild(tray);
+    }
 
     this.slots = f.slotDX.map((dx) => {
       const slot = new Container();
@@ -94,31 +93,6 @@ class FillBox {
 
   get openSlots() {
     return Math.max(0, this.slots.length - this._filledCount);
-  }
-
-  // Repaints an empty tray. Only ever used to hand the board a move again;
-  // a tray holding balls keeps the colour those balls were sorted into.
-  recolor(color) {
-    if (!color || color === this.color || this._filledCount > 0) return;
-    if (this.container.destroyed) return;
-    const f = F();
-    const t = this.world.textures;
-    this.color = color;
-    this.base.texture = t.boxBase[color];
-    this.base.width = f.base.w;
-    this.base.height = f.base.h;
-    this.front.texture = t.boxFront[color];
-    this.front.width = f.front.w;
-    this.front.height = f.front.h;
-    const lidVisible = this.lid.visible;
-    this.lid.texture = t.boxLid[color];
-    this.lid.width = f.lid.w;
-    this.lid.height = f.lid.h;
-    this._lidScaleX = this.lid.scale.x;
-    this._lidScaleY = this.lid.scale.y;
-    if (!lidVisible) this.lid.scale.set(0);
-    this.lid.visible = lidVisible;
-    this.trayPink.visible = color === COLORS.PINK;
   }
 
   setClosed() {
@@ -424,11 +398,10 @@ export class FillBoxManager {
     this.columnBusy = [false, false, false, false];
     this.colConsumed = [0, 0, 0, 0];
     this.totalFilled = 0;
-    this._jamTimer = 0;
     this.onAllBoxesFilled = null;
     this._queue = [];
 
-    // initial rows: one shared row index per row — whole-board colour waves
+    // initial rows; the row index feeds each column's cap
     let nextRowIndex = 0;
     for (let r = 0; r < f.rowYs.length; r++) {
       const rowIndex = nextRowIndex++;
@@ -449,72 +422,17 @@ export class FillBoxManager {
     this._queue.push(fn);
   }
 
-  _colorForRowIndex(i) {
-    const seq = ECONOMY.rowColorSequence;
-    return seq[((i % seq.length) + seq.length) % seq.length];
-  }
-
-  // Unjams a board that has no move left.
-  //
-  // Trays open on a fixed colour tape, but a tap delivers nine balls of one
-  // colour and the multipliers make that twenty-seven — the whole belt. Each
-  // column walks the tape at its own pace, so what is open rarely matches what
-  // arrived, and the surplus rides the belt with nowhere to go. Once nothing
-  // waiting fits anything open, no tray can fill, so no tray can open, and the
-  // belt silts up until the run is lost. Measured, a careful player still lost
-  // inside 30 s with the grid full and eighteen box-loads still in the pipes.
-  //
-  // Colouring new trays by demand does not reach this: a replacement joins the
-  // back of its column and only opens four fills later, by which time the belt
-  // holds something else. The tray that has to change is the open one, so when
-  // the board has been stuck for unjamDelay seconds the emptiest open tray is
-  // repainted to whichever colour has the most balls waiting. That is the
-  // smallest nudge that returns a move, and it leaves the tape in charge
-  // everywhere else.
-  _unjam(dt) {
-    const waiting = new Map();
-    for (const ball of Ball.all) {
-      if (ball.destroyed || ball.takenByBox) continue;
-      waiting.set(ball.color, (waiting.get(ball.color) ?? 0) + 1);
-    }
-    const fronts = [];
-    for (const column of this.columns) {
-      const front = column[0];
-      if (front && !front.container.destroyed && front.isOpen)
-        fronts.push(front);
-    }
-    const stuck =
-      waiting.size > 0 &&
-      fronts.length > 0 &&
-      !fronts.some((box) => (waiting.get(box.color) ?? 0) > 0);
-    if (!stuck) {
-      this._jamTimer = 0;
-      return;
-    }
-    this._jamTimer += dt;
-    if (this._jamTimer < ECONOMY.unjamDelay) return;
-    this._jamTimer = 0;
-
-    let color = null;
-    let most = 0;
-    for (const [c, n] of waiting) {
-      if (n > most) {
-        most = n;
-        color = c;
-      }
-    }
-    const target = fronts.reduce((a, b) => (b.openSlots > a.openSlots ? b : a));
-    target.recolor(color);
+  // A column is one colour for its whole life — see trayColumnColors in
+  // config.js for why nothing weaker survives. Its cap is that colour's share
+  // of the run's balls, so it runs out of trays exactly as the colour runs out
+  // of boxes.
+  _colorFor(colIndex) {
+    return ECONOMY.trayColumnColors[colIndex];
   }
 
   _createBox(colIndex, rowIndex) {
-    if (
-      ECONOMY.maxCycles > 0 &&
-      rowIndex >= ECONOMY.maxCycles * ECONOMY.rowColorSequence.length
-    ) {
-      return null;
-    }
-    const box = new FillBox(this, this._colorForRowIndex(rowIndex));
+    if (rowIndex >= ECONOMY.trayColumnCaps[colIndex]) return null;
+    const box = new FillBox(this, this._colorFor(colIndex));
     box.onBoxReserved = () => this._onBoxReserved(colIndex);
     box.onBoxFilled = () => {
       this.totalFilled++;
@@ -531,7 +449,7 @@ export class FillBoxManager {
 
     const rowIndex = this._nextRowIndex + this.colConsumed[col];
     this.colConsumed[col]++;
-    const newBox = this._canAddBox() ? this._createBox(col, rowIndex) : null;
+    const newBox = this._createBox(col, rowIndex);
     if (newBox) {
       newBox.setClosed();
       newBox.container.position.set(
@@ -562,48 +480,15 @@ export class FillBoxManager {
     if (pending === 0) this.columnBusy[col] = false;
   }
 
-  // Slots the trays currently on the board are still waiting to be given.
-  openSlotsRemaining() {
-    let slots = 0;
-    for (const column of this.columns) {
-      for (const box of column) {
-        if (!box.container.destroyed) slots += box.openSlots;
-      }
-    }
-    return slots;
-  }
-
-  // A column only tops itself up while the balls left to sort — those in play
-  // plus those the pipes have not delivered yet — could fill more than the
-  // trays already standing. maxCycles alone cannot do this: its 216 trays are
-  // 648 slots, which the 216 balls only reach if every single one is tripled
-  // on a multiplier bar, so any real run left rows on the board that nothing
-  // could ever fill and the level simply never ended. Asking the ball supply
-  // instead makes the grid drain exactly as the balls do, and it self-corrects
-  // — using the multipliers creates balls, which brings more trays with them.
-  _canAddBox() {
-    const source = this.world.sourceBoxManager;
-    if (!source) return true;
-    // While the pipes can still deliver, always top up. Thinning the grid
-    // early is unrecoverable — a column only refills when one of its own trays
-    // is consumed, so an empty one stays empty however many balls the
-    // multipliers go on to make — and it starves the board of the open colours
-    // that keep the belt moving. Measured, that left two dead columns facing
-    // 21 balls with 18 still to come. The supply only shapes the endgame.
-    if (source.ballsPending() > 0) return true;
-    return Ball.getUnsortedCount() > this.openSlotsRemaining();
-  }
-
   _checkAllFilled() {
-    // Draining every column is a win in its own right now: the grid can empty
-    // before the original's fixed quota is anywhere near reached.
+    // Draining every column is a win in its own right: with the trays counted
+    // to match the balls, the grid empties exactly as the last of them lands.
     if (this.columns.every((column) => column.length === 0)) {
       this.onAllBoxesFilled?.();
       return;
     }
-    if (ECONOMY.maxCycles <= 0) return;
-    const needed = ECONOMY.maxCycles * ECONOMY.rowColorSequence.length * 4;
-    if (this.totalFilled >= needed) this.onAllBoxesFilled?.();
+    const total = ECONOMY.trayColumnCaps.reduce((a, b) => a + b, 0);
+    if (this.totalFilled >= total) this.onAllBoxesFilled?.();
   }
 
   // Takes the whole receiver grid off the board once the run is decided:
@@ -630,8 +515,7 @@ export class FillBoxManager {
     return out;
   }
 
-  update(dt = 0) {
-    this._unjam(dt);
+  update() {
     if (this._queue.length) {
       const jobs = this._queue;
       this._queue = [];

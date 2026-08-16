@@ -43,37 +43,45 @@ export const ALL_COLORS = [COLORS.PINK, COLORS.ORANGE, COLORS.BLUE];
 export const ECONOMY = {
   ballsPerBox: 9,
   multiplier: 3,
-  // Boxes at rest: slot 0 is the CENTRE pipe and starts pink, slot 1 is the
-  // LEFT pipe (orange), slot 2 the RIGHT pipe (blue).
-  slotColors: [COLORS.PINK, COLORS.ORANGE, COLORS.BLUE],
   // Every pipe can deliver this many replacement boxes; the figure printed on
   // the pipe. Decrements when an emptied box finishes disappearing.
   pipeCharges: [7, 7, 7],
-  // Replacement colours come from one GLOBAL cycle shared by all three pipes,
-  // indexed by how many boxes have been emptied so far — not by pipe.
-  spawnSequence: [COLORS.BLUE, COLORS.PINK, COLORS.ORANGE],
   // While this many balls are loose on the board (not riding the belt, not in
   // a tray), taps are refused and the box shakes.
   maxFreeBalls: 27,
-  // Receiver rows repeat this colour tape, top of the board first. The four
-  // initial rows consume indices 0..3 (blue, blue, pink, pink); afterwards
-  // each column continues the same tape at its own pace.
-  rowColorSequence: [
-    COLORS.BLUE,
-    COLORS.BLUE,
-    COLORS.PINK,
-    COLORS.PINK,
-    COLORS.ORANGE,
-    COLORS.ORANGE,
-  ],
-  // A column stops producing new boxes after maxCycles * 6 of them. In the
-  // shipped playable that is 54 per column — far more than the 24 boxes of
-  // balls can ever fill, so in practice the run ends by fail or by the pipes
-  // running dry.
-  maxCycles: 9,
-  // How long the board may sit with no move — nothing waiting fits anything
-  // open — before a tray is repainted to give it one back.
-  unjamDelay: 1,
+
+  // --- the run's economy, balanced colour by colour ------------------------
+  //
+  // A run delivers 3 standing boxes + 3 pipes x 7 = 24 boxes of 9 balls, and
+  // every ball crosses a multiplier bar on its way down, so 216 balls become
+  // 648. The receivers hold 3 each, and 216 of them is exactly 648 slots —
+  // which is why the tray count matches the balls as they leave the boxes,
+  // before the x3.
+  //
+  // The same has to hold per colour or the balance is worthless: 8 boxes of a
+  // colour are 72 balls, 216 after the bars, and the 72 trays of that colour
+  // hold exactly 216. The original divided them differently — trays ran in
+  // pairs of a colour while boxes cycled — so demand and supply drifted apart,
+  // the surplus silted up the belt, and no run could be finished.
+  boxColors: [COLORS.BLUE, COLORS.PINK, COLORS.ORANGE],
+  boxesPerColor: 8,
+  // Every column is one colour for the whole run. Nothing weaker survives
+  // measurement:
+  //
+  //  - a per-tray cycle left 6 open slots facing a 27-ball burst: lost in 16 s
+  //  - blocks of 18 drifted out of step as the columns advanced at the
+  //    player's pace: lost in 103 s with a belt full of one colour
+  //  - three fixed columns plus one cycling column forced the tail of the run
+  //    into the cycling column's block order, while the box queue arrives
+  //    shuffled: the run hung with five boxes undeliverable
+  //
+  // A colour with its own column is open exactly as long as boxes of that
+  // colour remain — its capacity IS that colour's ball count — so any box in
+  // the queue can always be tapped and the belt can always drain, in any
+  // order. Blue takes two columns; the caps make each colour's 72 trays come
+  // out exactly.
+  trayColumnColors: [COLORS.BLUE, COLORS.PINK, COLORS.ORANGE, COLORS.BLUE],
+  trayColumnCaps: [36, 72, 72, 36],
   // With the pipes dry and the board locked, this long before the ending
   // screen — enough for a tray already swallowing a ball to finish and open
   // the next one, which can unlock the board after all.
@@ -155,8 +163,22 @@ export const WALLS = [
   wallBox(89, 308.05, 0, 10, 600),
   wallBox(-304.63, 219.08, 21.3, 10, 300),
   wallBox(304.63, 219.08, -21.3, 10, 300),
-  // belt shoulder — the floor free balls heap on
-  wallBox(-11.79, -251.75, 90, 5, 600),
+  // Belt shoulder — the floor free balls heap on. Thickened and widened from
+  // the original's 5x600 collider, which leaked.
+  //
+  // Measured: a free ball reaches 2163 px/s, which is 36 design px in one
+  // fixed 1/60 s step, and the original shoulder is 6 design px thick. There
+  // is no CCD here, so a ball falling hard simply appears on the far side of
+  // it. It also stopped 6 px short of the right-hand tray wall, leaving a slot
+  // in the corner. Either way the ball ends up in the tray area, where nothing
+  // can ever pick it up — trays only take balls riding the belt — so it lies
+  // there for the rest of the run.
+  //
+  // 50 px thick beats the worst single step, and the span now overlaps both
+  // side walls. The top surface stays where it was, so balls still heap in the
+  // same place, and the belt sits below the underside: balls riding it are out
+  // of the solver, so a thicker wall cannot disturb them.
+  wallBox(-3.5, -270.7, 90, 43.8, 614.8),
   // tray-area side walls and floor (balls normally never reach these)
   wallBox(-300.89, -393.96, 0, 10, 500),
   wallBox(298.73, -393.96, 0, 10, 500),

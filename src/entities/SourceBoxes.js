@@ -13,6 +13,40 @@ import { tweenTo, ease, delay, stopTweensOf } from "../tween.js";
 
 const B = () => LAYOUT.sourceBox;
 
+// The colours the 24 boxes of a run arrive in: eight of each, so the balls
+// coming in every colour match the trays waiting for them exactly.
+//
+// Shuffled, because a fixed cycle of three colours shared by three pipes gives
+// each pipe the same colour every time round — the run turns into pressing the
+// same three buttons in the same order from start to finish. Never more than
+// two of a colour in a row, though: three would put the same colour in all
+// three pipes at once and leave nothing to choose between.
+//
+// Built by always drawing from the colours with the most left, which cannot
+// paint itself into a corner the way a reshuffle-until-valid can.
+function buildBoxColors() {
+  const left = new Map(
+    ECONOMY.boxColors.map((c) => [c, ECONOMY.boxesPerColor]),
+  );
+  const out = [];
+  const total = ECONOMY.boxColors.length * ECONOMY.boxesPerColor;
+  while (out.length < total) {
+    const banned =
+      out.length >= 2 && out[out.length - 1] === out[out.length - 2]
+        ? out[out.length - 1]
+        : null;
+    const choices = ECONOMY.boxColors.filter(
+      (c) => left.get(c) > 0 && c !== banned,
+    );
+    const most = Math.max(...choices.map((c) => left.get(c)));
+    const best = choices.filter((c) => left.get(c) === most);
+    const pick = best[Math.floor(Math.random() * best.length)];
+    out.push(pick);
+    left.set(pick, left.get(pick) - 1);
+  }
+  return out;
+}
+
 class Box {
   constructor(manager, slotIndex) {
     this.manager = manager;
@@ -230,11 +264,14 @@ export class SourceBoxManager {
     this._buildPipes();
 
     this.pipeCharges = [...ECONOMY.pipeCharges];
-    this.colorCycleIndex = 0;
+    // The three standing boxes are the front of the same queue the pipes draw
+    // from, so the eight-per-colour balance covers the whole run.
+    this.boxColors = buildBoxColors();
+    this.colorCursor = 0;
     this.boxes = [];
     for (let i = 0; i < 3; i++) {
       const box = new Box(this, i);
-      box.placeInstant(ECONOMY.slotColors[i]);
+      box.placeInstant(this._pickNextBoxColor());
       this.boxes.push(box);
       this._updatePipeLabel(i);
     }
@@ -319,9 +356,8 @@ export class SourceBoxManager {
   }
 
   _pickNextBoxColor() {
-    const seq = ECONOMY.spawnSequence;
-    const color = seq[this.colorCycleIndex % seq.length];
-    this.colorCycleIndex++;
+    const color = this.boxColors[this.colorCursor % this.boxColors.length];
+    this.colorCursor++;
     return color;
   }
 
