@@ -222,12 +222,20 @@ export function buildCTA(layer, textures, { onClick } = {}) {
   };
 
   let revealed = false;
-  cta.reveal = () => {
+  // `instant` skips the pop-in. The editor uses it: you cannot drag a widget
+  // that is waiting for a tap to appear, and a scene rebuild on every drag
+  // frame would otherwise restart the tween and leave it pulsing under the
+  // cursor.
+  cta.reveal = (instant = false) => {
     if (revealed) return;
     revealed = true;
     const sx = C.w / cta.texture.width;
     const sy = C.h / cta.texture.height;
     cta.visible = true;
+    if (instant) {
+      cta.scale.set(sx, sy);
+      return;
+    }
     cta.scale.set(0);
     tweenTo(cta.scale, { x: sx * 1.15, y: sy * 1.15 }, 0.15, ease.outBack, () =>
       tweenTo(cta.scale, { x: sx, y: sy }, 0.1, ease.sineOut),

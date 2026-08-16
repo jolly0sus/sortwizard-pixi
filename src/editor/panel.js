@@ -85,6 +85,14 @@ export function mountEditor(game) {
   let panel = null;
   let refresh = () => {};
 
+  // The CTA waits for the player's first tap before it appears, which leaves
+  // nothing to drag in the editor. While the panel is open it is shown
+  // outright — after every rebuild too, since that starts a fresh scene with
+  // it hidden again.
+  const revealCTA = () => {
+    if (panel) game.getScene?.()?.cta?.reveal(true);
+  };
+
   // A drag fires many times a frame; coalesce the rebuild into the next one.
   let queued = false;
   const scheduleRebuild = () => {
@@ -93,6 +101,7 @@ export function mountEditor(game) {
     requestAnimationFrame(() => {
       queued = false;
       game.rebuild();
+      revealCTA();
     });
   };
 
@@ -343,6 +352,7 @@ export function mountEditor(game) {
       tip.style.display = "";
     } else {
       build();
+      revealCTA();
       overlay.setEnabled(true);
       tip.style.display = "none";
     }

@@ -1,4 +1,4 @@
-import { LAYOUT } from "../config.js";
+import { LAYOUT, DESIGN_H, DESIGN_W } from "../config.js";
 
 // Everything on the board is driven by numbers in LAYOUT rather than by
 // free-standing sprites, so a "selectable object" is a rectangle plus the rule
@@ -11,6 +11,17 @@ import { LAYOUT } from "../config.js";
 //   minW / minH   - guards so a drag cannot collapse it
 
 const clamp = (v, lo) => Math.max(lo, v);
+
+// Insets are written back from mouse coordinates, so they arrive with a tail
+// of float noise. Sub-pixel precision means nothing here and makes the
+// exported JSON unreadable.
+const px = (v) => Math.round(v * 100) / 100;
+
+// A move rewrites the whole rect, width included — and rounding a width that
+// nobody touched would land 0.005 away from the default and show up in the
+// export as a change. Values that survive the round-trip keep their original
+// number instead, so a drag only dirties what the drag actually moved.
+const keep = (next, current) => (px(next) === px(current) ? current : px(next));
 
 // Spread n items evenly between two outer centres.
 function spread(count, left, right) {
@@ -43,10 +54,61 @@ function centred(id, label, node, extraFields = []) {
   };
 }
 
-export function editableObjects() {
+// The logo and the CTA are the only things on screen that are not placed in
+// design space: they hang off the corners of the *visible* rect, so the same
+// LAYOUT numbers land somewhere different on every aspect ratio. That is why
+// this one needs `viewport` — rect() has to ask which edges the scene is using
+// right now, and setRect() writes an inset from that edge rather than an
+// absolute x, which is what keeps the widget glued to its corner afterwards.
+//
+// `edge` is "left" or "right"; both are measured inwards, and both sit above
+// the bottom of the design rect by `bottom`.
+function cornerWidget(id, label, node, edge, viewport) {
+  return {
+    id,
+    label,
+    minW: 30,
+    minH: 20,
+    fields: [`ui.${id}.${edge}`, `ui.${id}.bottom`, `ui.${id}.w`, `ui.${id}.h`],
+    rect: () => {
+      const n = node();
+      const v = viewport();
+      return {
+        x: edge === "left" ? v.left + n.left : v.right - n.right - n.w,
+        y: DESIGN_H - n.bottom - n.h,
+        w: n.w,
+        h: n.h,
+      };
+    },
+    setRect: (r) => {
+      const n = node();
+      const v = viewport();
+      if (edge === "left") n.left = keep(r.x - v.left, n.left);
+      else n.right = keep(v.right - (r.x + r.w), n.right);
+      n.bottom = keep(DESIGN_H - (r.y + r.h), n.bottom);
+      n.w = keep(r.w, n.w);
+      n.h = keep(r.h, n.h);
+    },
+  };
+}
+
+// `viewport()` returns the visible rect's left and right edges in design
+// coordinates. It defaults to the design rect itself so the function stays
+// callable without a live scene (tests, console pokes).
+export function editableObjects(
+  viewport = () => ({ left: 0, right: DESIGN_W }),
+) {
   const L = LAYOUT;
 
   return [
+    cornerWidget(
+      "logo",
+      "Логотип SortWizard",
+      () => L.ui.logo,
+      "left",
+      viewport,
+    ),
+    cornerWidget("cta", "Кнопка Play now", () => L.ui.cta, "right", viewport),
     centred("wood", "Доска (дерево)", () => L.wood),
     centred("frame", "Рамка", () => L.frame),
     {

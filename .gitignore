@@ -27,3 +27,4 @@ dist-ssr
 
 # single-file build output
 single
+.env*

@@ -208,6 +208,9 @@ function buildScene(app, textures) {
     conveyor: world.conveyor,
     sourceBoxManager,
     fillBoxManager: world.fillBoxManager,
+    // the editor reaches for these to show the CTA before the first tap
+    logo,
+    cta,
     destroy() {
       clearTimeout(hintTimer);
       cancelAll();
