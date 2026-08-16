@@ -211,6 +211,7 @@ function buildScene(app, textures) {
     destroy() {
       clearTimeout(hintTimer);
       cancelAll();
+      tapCounter.destroy();
       app.ticker.remove(tick);
       Ball.clearPool();
       stageRoot.destroy({ children: true, context: true });

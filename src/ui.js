@@ -21,9 +21,15 @@ export class TapCounter {
     this._lastTapTime = -1;
     // A DOM listener, not a stage hitArea: in Pixi v8 a hitArea on the stage
     // would swallow hit-testing for every interactive child.
-    canvas.addEventListener("pointerup", () => this._tryCount(), {
-      passive: true,
-    });
+    this._canvas = canvas;
+    this._handler = () => this._tryCount();
+    canvas.addEventListener("pointerup", this._handler, { passive: true });
+  }
+
+  // Scene teardown (the editor's rebuild) must drop the listener, or every
+  // rebuild stacks another one still pointing at a destroyed CTA.
+  destroy() {
+    this._canvas.removeEventListener("pointerup", this._handler);
   }
 
   registerTap() {
