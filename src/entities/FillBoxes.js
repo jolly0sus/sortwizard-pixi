@@ -1,181 +1,328 @@
-import { Container, Graphics, Sprite } from "pixi.js";
-import { LAYOUT, ALL_COLORS, ECONOMY } from "../config.js";
-import { audio } from "../audio.js";
-import { tweenTo, ease, delay } from "../tween.js";
+// Port of the original FillBox.ts + FillBoxManager.ts.
+//
+// A 4x4 grid of receiver boxes. Row colours follow one global tape
+// (blue, blue, pink, pink, orange, orange, repeat); the four initial rows
+// consume indices 0..3, and afterwards every column continues the same tape
+// at its own pace. Only a column's front box is open; when its third ball
+// lands the box rises, pops, and the column shifts up with a new closed box
+// arriving from below.
+import { Container, Sprite } from "pixi.js";
+import { LAYOUT, ECONOMY, COLORS } from "../config.js";
 import { Ball } from "./Ball.js";
-import { buildTrayLayout } from "./trayLayout.js";
+import { audio } from "../audio.js";
+import { tweenTo, ease, delay, stopTweensOf } from "../tween.js";
 
-// read live so the editor can retune well spacing without a reload
-const slotOffsets = () => LAYOUT.fillColumns.slotOffsets;
-// Trays each column works through. Set by the closed economy in config, so
-// the last tray is filled by the last ball.
-const ROWS_TOTAL = ECONOMY.rowsPerColumn;
-// How far above the trays the column mask reaches. Must clear the belt's
-// lower slot row, otherwise a ball briefly vanishes between leaving the belt
-// and entering the mask.
-const MASK_HEADROOM = 100;
+const F = () => LAYOUT.fill;
 
-// One receiver tray. Closed it shows the plain lid bar; open it shows the
-// base with three ball wells and sits slightly taller.
-class Tile {
-  constructor(column, color, world) {
-    this.column = column;
+class FillBox {
+  constructor(manager, color) {
+    this.manager = manager;
+    this.world = manager.world;
     this.color = color;
-    this.world = world;
-    this.isOpen = false;
-    this.filledCount = 0;
-    this.landedCount = 0;
-    this.reserved = false;
-    this.slotTaken = [false, false, false];
-    this.balls = [null, null, null];
 
-    this.container = new Container();
+    const f = F();
+    const t = this.world.textures;
+    const container = new Container();
+    this.container = container;
 
-    // contact shadow, so the stack of trays reads as stepped rather than flat
-    this.shadow = new Sprite(world.textures.boxShadow);
+    this.shadow = new Sprite(t.boxShadow);
     this.shadow.anchor.set(0.5);
-    this.shadow.width = LAYOUT.fillColumns.tileW * 1.06;
-    this.shadow.height = LAYOUT.fillColumns.closedH * 1.15;
-    this.shadow.y = 7;
-    this.shadow.alpha = 0.3;
-    this.container.addChild(this.shadow);
+    this.shadow.position.set(0, f.shadow.dy);
+    this.shadow.width = f.shadow.w;
+    this.shadow.height = f.shadow.h;
+    container.addChild(this.shadow);
 
-    this.sprite = new Sprite(world.textures.boxLid[color]);
-    this.sprite.anchor.set(0.5);
-    this.container.addChild(this.sprite);
+    this.base = new Sprite(t.boxBase[color]);
+    this.base.anchor.set(0.5);
+    this.base.width = f.base.w;
+    this.base.height = f.base.h;
+    container.addChild(this.base);
 
-    // Balls are re-parented in here once they start dropping, so they ride
-    // along with the tray. Clipping is done once per column (see FillColumn)
-    // rather than per tray — a mask per tray churned GPU resources fast
-    // enough to lose the WebGL context part-way through a game.
-    this.ballHolder = new Container();
-    this.container.addChild(this.ballHolder);
-
-    this.close();
-  }
-
-  setY(y, animated) {
-    if (animated) tweenTo(this.container, { y }, 0.18, ease.sineInOut);
-    else this.container.y = y;
-  }
-
-  open() {
-    if (this.isOpen) return;
-    this.isOpen = true;
-    this.sprite.texture = this.world.textures.boxBase[this.color];
-    this.sprite.width = LAYOUT.fillColumns.tileW;
-    this.sprite.height = LAYOUT.fillColumns.openH;
-    this.container.zIndex = 10;
-  }
-
-  close() {
-    this.isOpen = false;
-    this.sprite.texture = this.world.textures.boxLid[this.color];
-    this.sprite.width = LAYOUT.fillColumns.tileW;
-    this.sprite.height = LAYOUT.fillColumns.closedH;
-    this.container.zIndex = 0;
-  }
-
-  // Swap an untouched tray over to another colour. Used to break a deadlock
-  // when the belt is jammed with something no open tray wants.
-  recolor(color) {
-    this.color = color;
-    if (this.isOpen) {
-      this.isOpen = false;
-      this.open();
-    } else {
-      this.close();
+    // the pink prefab carries an extra deep-wells overlay
+    if (color === COLORS.PINK) {
+      const tray = new Sprite(t.boxTrayPink);
+      tray.anchor.set(0.5);
+      tray.position.set(0, f.trayPink.dy);
+      tray.width = f.trayPink.w;
+      tray.height = f.trayPink.h;
+      container.addChild(tray);
     }
+
+    this.slots = f.slotDX.map((dx) => {
+      const slot = new Container();
+      slot.position.set(dx, f.slotDY);
+      container.addChild(slot);
+      return slot;
+    });
+
+    this.front = new Sprite(t.boxFront[color]);
+    this.front.anchor.set(0.5);
+    this.front.position.set(0, f.front.dy);
+    this.front.width = f.front.w;
+    this.front.height = f.front.h;
+    container.addChild(this.front);
+
+    this.lid = new Sprite(t.boxLid[color]);
+    this.lid.anchor.set(0.5);
+    this.lid.position.set(0, f.lid.dy);
+    this.lid.width = f.lid.w;
+    this.lid.height = f.lid.h;
+    container.addChild(this.lid);
+    this._lidScaleX = this.lid.scale.x;
+    this._lidScaleY = this.lid.scale.y;
+
+    this.onBoxReserved = null;
+    this.onBoxFilled = null;
+    this._isOpen = false;
+    this._filledCount = 0;
+    this._landedCount = 0;
+    this._reservedFired = false;
+    this._busy = false;
+    this._slottedBalls = [];
+    this._ballsInZone = new Set();
+    this._glowTimers = new Map();
+  }
+
+  get isOpen() {
+    return this._isOpen;
   }
 
   get isFilled() {
-    return this.filledCount >= slotOffsets().length;
+    return this._filledCount >= this.slots.length;
   }
 
-  // Index of the free well nearest to world x, or -1 if none is close enough.
-  // Picking the nearest (rather than filling strictly left to right) keeps the
-  // sideways travel under half a well pitch, so the ball really does just drop.
-  freeSlotNear(x, tolerance) {
-    let best = -1;
-    let bestDist = tolerance;
-    for (let i = 0; i < slotOffsets().length; i++) {
-      if (this.slotTaken[i]) continue;
-      const d = Math.abs(x - (this.column.x + slotOffsets()[i]));
-      if (d < bestDist) {
-        bestDist = d;
-        best = i;
+  setClosed() {
+    this._isOpen = false;
+    this.lid.visible = true;
+    this.lid.scale.set(this._lidScaleX, this._lidScaleY);
+  }
+
+  openInstant() {
+    this.lid.visible = false;
+    this._isOpen = true;
+  }
+
+  open() {
+    if (this._isOpen) return;
+    this.lid.visible = true;
+    tweenTo(
+      this.lid.scale,
+      { x: this._lidScaleX * 1.08, y: this._lidScaleY * 1.08 },
+      0.1,
+      ease.outQuad,
+      () =>
+        tweenTo(this.lid.scale, { x: 0, y: 0 }, 0.15, ease.inQuad, () => {
+          this.lid.visible = false;
+          this._isOpen = true;
+        }),
+    );
+  }
+
+  _triggerPos() {
+    return {
+      x: this.container.x,
+      y: this.container.y + F().colliderDY,
+    };
+  }
+
+  update() {
+    const f = F();
+    const trig = this._triggerPos();
+
+    // prune the zone
+    if (this._ballsInZone.size) {
+      for (const ball of Array.from(this._ballsInZone)) {
+        if (!ball || ball.destroyed || ball.takenByBox) {
+          this._ballsInZone.delete(ball);
+          continue;
+        }
+        if (ball.owningCell) {
+          const dx = ball.x - trig.x;
+          const dy = ball.y - trig.y;
+          if (dx * dx + dy * dy > f.triggerRadius * f.triggerRadius) {
+            this._ballsInZone.delete(ball);
+          }
+        }
       }
     }
-    return best;
+
+    if (!this._isOpen || this._busy || this.isFilled) return;
+
+    // swept recovery: fast conveyor balls the overlap test may have missed
+    for (const ball of Ball.getConveyorBalls()) {
+      if (this._ballsInZone.has(ball)) continue;
+      if (ball.color !== this.color || !ball.owningCell) continue;
+      const prevY = ball.hasPrevConveyorPos ? ball.prevConveyorY : ball.y;
+      if (
+        Math.min(Math.abs(ball.y - trig.y), Math.abs(prevY - trig.y)) >
+        f.pickupHalfH
+      )
+        continue;
+      const prevX = ball.hasPrevConveyorPos ? ball.prevConveyorX : ball.x;
+      const maxX = Math.max(ball.x, prevX);
+      const minX = Math.min(ball.x, prevX);
+      if (maxX >= trig.x - f.pickupHalfW && minX <= trig.x + f.pickupHalfW) {
+        this._ballsInZone.add(ball);
+      }
+    }
+    // plain overlap contact with the collider box
+    for (const ball of Ball.getConveyorBalls()) {
+      if (this._ballsInZone.has(ball)) continue;
+      if (
+        Math.abs(ball.x - trig.x) <= f.colliderHalfW &&
+        Math.abs(ball.y - trig.y) <= f.colliderHalfH
+      ) {
+        this._ballsInZone.add(ball);
+      }
+    }
+
+    for (const ball of this._ballsInZone) {
+      if (this._tryTakeBall(ball)) break; // at most one per frame
+    }
   }
 
-  tryTake(ball, slotIdx) {
-    if (!this.isOpen || this.isFilled || ball.color !== this.color)
+  _tryTakeBall(ball) {
+    if (!this._isOpen || this.isFilled) return false;
+    if (!ball || ball.destroyed) {
+      this._ballsInZone.delete(ball);
       return false;
-    if (!ball.owningCell || this.slotTaken[slotIdx]) return false;
-
-    const fc = LAYOUT.fillColumns;
-    this.slotTaken[slotIdx] = true;
-    this.filledCount++;
-    ball.takenByBox = true;
-    ball.capturedByCell = true;
-    ball.owningCell.ball = null;
-    ball.owningCell = null;
-    this.world.freeBalls.delete(ball);
-
-    // hand the ball over to the tray, preserving its on-screen position
-    const localX = ball.x - this.column.x;
-    const localY = ball.y - (fc.topY + this.container.y);
-    this.ballHolder.addChild(ball);
-    ball.x = localX;
-    ball.y = localY;
-
-    tweenTo(ball, { y: fc.slotY }, 0.2, ease.inQuad, () => {
-      // A bloom rather than a bulb switching off: the ball flares, a ring of
-      // light opens out of it and fades, and only then does the ball settle
-      // back to its normal shade.
-      ball.glow(true);
-      const spark = new Graphics()
-        .circle(0, 0, 26)
-        .stroke({ color: 0xffffff, width: 7, alpha: 0.95 });
-      spark.x = ball.x;
-      spark.y = ball.y;
-      this.ballHolder.addChild(spark);
-      // Both tweens touch the same object, so only the one that finishes last
-      // may destroy it — otherwise the survivor writes to a freed .scale on
-      // its next frame and throws.
-      let running = 2;
-      const finished = () => {
-        if (--running === 0 && !spark.destroyed) spark.destroy();
-      };
-      tweenTo(spark.scale, { x: 2.1, y: 2.1 }, 0.34, ease.outQuad, finished);
-      tweenTo(spark, { alpha: 0 }, 0.34, ease.outQuad, finished);
-      delay(0.45, () => ball.glow(false));
-      audio.playBallInBox();
-      this.balls[slotIdx] = ball;
-      this.landedCount++;
-      if (this.landedCount >= slotOffsets().length) this._onFilled();
-    });
-    tweenTo(ball, { x: slotOffsets()[slotIdx] }, 0.2, ease.sineOut);
-    // shrink so it nests inside the moulded well instead of overflowing it
-    tweenTo(
-      ball.scale,
-      { x: fc.ballScale, y: fc.ballScale },
-      0.2,
-      ease.sineOut,
-    );
+    }
+    if (ball.takenByBox) {
+      this._ballsInZone.delete(ball);
+      return false;
+    }
+    if (ball.color !== this.color) return false;
+    if (!ball.owningCell) return false;
+    if (ball.owningCell.isSnapping) return false;
+    const slotIndex = this._filledCount;
+    this._filledCount++;
+    this._busy = true;
+    this._ballsInZone.delete(ball);
+    this.manager.nextTick(() => this._captureAndMove(ball, slotIndex));
     return true;
   }
 
+  _rollback() {
+    this._filledCount = Math.max(0, this._filledCount - 1);
+    this._busy = false;
+    if (this._filledCount < this.slots.length) this._reservedFired = false;
+  }
+
+  _captureAndMove(ball, slotIndex) {
+    if (!ball || ball.destroyed || ball.takenByBox) return this._rollback();
+    if (ball.color !== this.color) return this._rollback();
+    const cell = ball.owningCell;
+    if (cell && cell.ball === ball) {
+      if (cell.isSnapping) {
+        this.manager.nextTick(() => this._captureAndMove(ball, slotIndex));
+        return;
+      }
+      const taken = cell.takeBall();
+      if (taken) return this._moveBallToSlot(taken, slotIndex);
+      if (ball.capturedByCell && !ball.takenByBox) {
+        this.manager.nextTick(() => this._captureAndMove(ball, slotIndex));
+        return;
+      }
+      return this._rollback();
+    }
+    if (!ball.takenByBox && ball.capturedByCell) {
+      this.manager.nextTick(() => this._captureAndMove(ball, slotIndex));
+      return;
+    }
+    this._rollback();
+  }
+
+  _moveBallToSlot(ball, slotIndex) {
+    if (!ball || ball.destroyed) return this._rollback();
+    const slot = this.slots[slotIndex];
+    if (!slot) {
+      this._busy = false;
+      return;
+    }
+    // reparent into the slot, keeping the on-screen position
+    const global = ball.parent.toGlobal(ball.position);
+    slot.addChild(ball);
+    const local = slot.toLocal(global);
+    ball.position.set(local.x, local.y);
+    ball.scale.set(1);
+    this._slottedBalls.push(ball);
+    this._busy = false;
+
+    // arced flight to the slot centre (all in slot-local space)
+    const nx = ball.x;
+    const ny = ball.y;
+    const dxn = -nx;
+    const dyn = -ny;
+    const d = Math.hypot(dxn, dyn) || 1;
+    const f = F().bulge * (nx >= 0 ? -1 : 1);
+    const midX = nx / 2 + (dyn / d) * f;
+    const midY = ny / 2 + (-dxn / d) * f;
+    const seg1 = 0.22 * 0.45;
+    const seg2 = 0.22 * 0.55;
+    tweenTo(ball, { x: midX, y: midY }, seg1, ease.sineOut, () =>
+      tweenTo(ball, { x: 0, y: 0 }, seg2, ease.sineIn, () =>
+        this._onBallLanded(ball),
+      ),
+    );
+    tweenTo(ball.scale, { x: 1.18, y: 1.18 }, seg1, ease.sineOut, () =>
+      tweenTo(ball.scale, { x: 0.8, y: 0.8 }, seg2, ease.sineIn),
+    );
+  }
+
+  _onBallLanded(ball) {
+    if (ball.destroyed || this.container.destroyed) return;
+    ball.scale.set(0.91, 0.69);
+    tweenTo(ball.scale, { x: 0.8, y: 0.8 }, 0.1, ease.elasticOut);
+    this._startBallGlow(ball, 0.2);
+    const p = this.container.parent.toLocal(
+      ball.parent.toGlobal(ball.position),
+    );
+    this.manager.spawnHitEffect(this.container.parent, p.x, p.y, 0.18);
+    audio.playBallInBox();
+    this._landedCount++;
+    if (this._landedCount >= this.slots.length) this._onFilled();
+  }
+
+  _startBallGlow(ball, duration) {
+    const old = this._glowTimers.get(ball);
+    if (old) clearTimeout(old);
+    ball.setGlowSprite(true);
+    const id = delay(duration, () => {
+      this._glowTimers.delete(ball);
+      if (!ball.destroyed) ball.setGlowSprite(false);
+    });
+    this._glowTimers.set(ball, id);
+  }
+
   _onFilled() {
-    if (!this.reserved) {
-      this.reserved = true;
-      delay(0, () => this.column.onTileReserved());
+    // snap all three balls into final slot state, killing in-flight tweens
+    for (const ball of this._slottedBalls) {
+      stopTweensOf(ball);
+      stopTweensOf(ball.scale);
+      ball.position.set(0, 0);
+      ball.scale.set(0.8);
+    }
+    // rise above the other boxes
+    const topLayer = this.world.topLayer;
+    const global = this.container.parent.toGlobal(this.container.position);
+    topLayer.addChild(this.container);
+    const local = topLayer.toLocal(global);
+    this.container.position.set(local.x, local.y);
+
+    if (!this._reservedFired) {
+      this._reservedFired = true;
+      this.manager.nextTick(() => this.onBoxReserved?.());
     }
     audio.playBoxFilled();
+    for (const ball of this._slottedBalls) {
+      this._startBallGlow(ball, 0.25);
+      const p = ball.parent.toGlobal(ball.position);
+      const lp = this.container.toLocal(p);
+      this.manager.spawnHitEffect(this.container, lp.x, lp.y, 0.15);
+    }
     tweenTo(
       this.container,
-      { y: this.container.y - 30 },
+      { y: this.container.y - F().rise },
       0.09,
       ease.outBack,
       () => delay(0.05, () => this._disappear()),
@@ -183,219 +330,193 @@ class Tile {
   }
 
   _disappear() {
-    // The pop is a chain of delayed tweens, and the tray can be torn down in
-    // between — a scene rebuild, or a second fill landing on the same tile.
-    // A destroyed container has no .scale, so animating it throws.
     if (this.container.destroyed) return;
     tweenTo(
       this.container.scale,
       { x: 1.08, y: 1.08 },
       0.05,
       ease.outQuad,
-      () => {
-        if (this.container.destroyed) return;
+      () =>
         tweenTo(this.container.scale, { x: 0, y: 0 }, 0.1, ease.inBack, () => {
-          // recycle everything still inside, including any ball that was
-          // mid-drop when the tray filled — otherwise it gets destroyed
-          // along with the tray instead of returning to the pool
-          for (const child of [...this.ballHolder.children]) {
-            if (child instanceof Ball) Ball.despawn(child);
+          if (this.container.destroyed) return;
+          const parent = this.container.parent;
+          const p = { x: this.container.x, y: this.container.y };
+          this.manager.spawnFillEffect(parent, p.x, p.y);
+          for (const ball of this._slottedBalls) {
+            stopTweensOf(ball);
+            stopTweensOf(ball.scale);
+            this.world.despawnBall(ball);
           }
-          this.balls = [null, null, null];
-          this.column.onTileCleared(this);
-        });
-      },
+          this._slottedBalls.length = 0;
+          const cb = this.onBoxFilled;
+          this.onBoxFilled = null;
+          cb?.();
+          this.container.destroy({ children: true });
+        }),
     );
-  }
-}
-
-class FillColumn {
-  constructor(index, manager, world) {
-    this.index = index;
-    this.manager = manager;
-    this.world = world;
-    this.x = LAYOUT.fillColumns.xs[index];
-    this.tiles = [];
-
-    const fc = LAYOUT.fillColumns;
-    this.container = new Container();
-    this.container.x = this.x;
-    this.container.y = fc.topY;
-    this.container.sortableChildren = true;
-    world.fillLayer.addChild(this.container);
-
-    // One long-lived mask for the whole column: keeps balls inside the tray
-    // stack, lets a filled tray pop upward, and hides the queued trays that
-    // would otherwise stick out past the bottom of the board.
-    //
-    // The lower edge is the board's own inner rim, not a count of rows. Tying
-    // it to rowsVisible let the last row finish clear of the frame and sit
-    // there fully drawn, which reads as a stack that simply stops; the
-    // original cuts that row against the woodwork so the column looks like it
-    // continues underneath. FRAME_INNER_INSET is half the widest frame ring
-    // (26px, centred on the board path in Board.js), which is where the gold
-    // stops and the wood begins.
-    const FRAME_INNER_INSET = 13;
-    const top = -MASK_HEADROOM;
-    const bottom = LAYOUT.board.bottom - FRAME_INNER_INSET - fc.topY;
-    this.mask = new Graphics()
-      .roundRect(-fc.tileW / 2 - 4, top, fc.tileW + 8, bottom - top, 16)
-      .fill(0xffffff);
-    this.container.addChild(this.mask);
-    this.container.mask = this.mask;
-  }
-
-  addTile(tile, row) {
-    tile.container.y = row * LAYOUT.fillColumns.rowStep;
-    this.container.addChild(tile.container);
-    this.tiles.push(tile);
-  }
-
-  // The top tray is full and rising: queue a fresh one at the bottom.
-  onTileReserved() {
-    const tile = this.manager.createTileForColumn(this.index);
-    if (!tile) return;
-    const lastY = this.tiles.length
-      ? this.tiles[this.tiles.length - 1].container.y
-      : 0;
-    tile.container.y = lastY + LAYOUT.fillColumns.rowStep;
-    this.container.addChild(tile.container);
-    this.tiles.push(tile);
-  }
-
-  onTileCleared(tile) {
-    const idx = this.tiles.indexOf(tile);
-    if (idx >= 0) this.tiles.splice(idx, 1);
-    // context:true frees the Graphics GPU buffers; texture stays false so the
-    // shared tray artwork is not torn down with it
-    tile.container.destroy({ children: true, context: true });
-    for (let i = 0; i < this.tiles.length; i++) {
-      this.tiles[i].setY(i * LAYOUT.fillColumns.rowStep, true);
-    }
-    this.refreshOpen();
-    this.manager.onTileFullyCleared();
-  }
-
-  // The trays a ball can actually drop into right now. A tap loads 27 balls
-  // (9 trays' worth) in one go, so a single open tray per column could never
-  // absorb it — the belt jammed every time. Three deep gives 12 live trays.
-  openTiles() {
-    return this.tiles
-      .slice(0, LAYOUT.fillColumns.openRows)
-      .filter((t) => t.isOpen);
-  }
-
-  refreshOpen() {
-    for (const tile of this.tiles.slice(0, LAYOUT.fillColumns.openRows)) {
-      tile.open();
-    }
   }
 }
 
 export class FillBoxManager {
   constructor(world) {
     this.world = world;
-    this.totalCleared = 0;
-    this.totalTilesPlanned = ROWS_TOTAL * LAYOUT.fillColumns.xs.length;
+    const f = F();
 
-    // The whole board's colours are decided up front: exact per-colour totals
-    // matching the pipes' stock, and no colour repeated down a column.
-    this._layout = buildTrayLayout(
-      LAYOUT.fillColumns.xs.length,
-      ROWS_TOTAL,
-      ALL_COLORS,
-    );
-
-    this.columns = LAYOUT.fillColumns.xs.map(
-      (_, i) => new FillColumn(i, this, world),
-    );
-
-    for (let r = 0; r < LAYOUT.fillColumns.rowsVisible; r++) {
-      for (const col of this.columns) {
-        const tile = this._createTile(col);
-        if (tile) col.addTile(tile, r);
+    // static "socket" sprites at every anchor, under the boxes
+    for (const y of f.rowYs) {
+      for (const x of f.xs) {
+        const socket = new Sprite(world.textures.boxBase[COLORS.BLUE]);
+        socket.anchor.set(0.5);
+        socket.position.set(x, y);
+        socket.width = f.base.w;
+        socket.height = f.base.h;
+        world.fillLayer.addChild(socket);
       }
     }
-    for (const col of this.columns) col.refreshOpen();
-  }
 
-  _createTile(column) {
-    const queue = this._layout[this.columns.indexOf(column)];
-    if (!queue.length) return null;
-    return new Tile(column, queue.shift(), this.world);
-  }
+    this.columns = [[], [], [], []];
+    this.columnBusy = [false, false, false, false];
+    this.colConsumed = [0, 0, 0, 0];
+    this.totalFilled = 0;
+    this.onAllBoxesFilled = null;
+    this._queue = [];
 
-  createTileForColumn(colIdx) {
-    return this._createTile(this.columns[colIdx]);
-  }
-
-  // Balls still wanted by the trays that are currently open, per colour.
-  // The source boxes use this to decide what to hand the player next.
-  getDemand() {
-    const demand = new Map();
-    for (const col of this.columns) {
-      for (const t of col.openTiles()) {
-        if (t.isFilled) continue;
-        const need = slotOffsets().length - t.filledCount;
-        demand.set(t.color, (demand.get(t.color) ?? 0) + need);
+    // initial rows: one shared row index per row — whole-board colour waves
+    let nextRowIndex = 0;
+    for (let r = 0; r < f.rowYs.length; r++) {
+      const rowIndex = nextRowIndex++;
+      for (let col = 0; col < 4; col++) {
+        const box = this._createBox(col, rowIndex);
+        if (!box) continue;
+        box.container.position.set(f.xs[col], f.rowYs[r]);
+        world.fillLayer.addChild(box.container);
+        if (r === 0) box.openInstant();
+        else box.setClosed();
+        this.columns[col].push(box);
       }
     }
-    return demand;
+    this._nextRowIndex = nextRowIndex;
   }
 
-  getOpenColors() {
-    const s = new Set();
-    for (const col of this.columns) {
-      for (const tile of col.openTiles()) s.add(tile.color);
+  nextTick(fn) {
+    this._queue.push(fn);
+  }
+
+  _colorForRowIndex(i) {
+    const seq = ECONOMY.rowColorSequence;
+    return seq[((i % seq.length) + seq.length) % seq.length];
+  }
+
+  _createBox(colIndex, rowIndex) {
+    if (
+      ECONOMY.maxCycles > 0 &&
+      rowIndex >= ECONOMY.maxCycles * ECONOMY.rowColorSequence.length
+    ) {
+      return null;
     }
-    return s;
+    const box = new FillBox(this, this._colorForRowIndex(rowIndex));
+    box.onBoxReserved = () => this._onBoxReserved(colIndex);
+    box.onBoxFilled = () => {
+      this.totalFilled++;
+      this._checkAllFilled();
+    };
+    return box;
+  }
+
+  _onBoxReserved(col) {
+    const f = F();
+    const column = this.columns[col];
+    column.shift(); // the consumed front box destroys itself
+    this.columnBusy[col] = true;
+
+    const rowIndex = this._nextRowIndex + this.colConsumed[col];
+    this.colConsumed[col]++;
+    const newBox = this._createBox(col, rowIndex);
+    if (newBox) {
+      newBox.setClosed();
+      newBox.container.position.set(
+        f.xs[col],
+        f.rowYs[f.rowYs.length - 1] + f.rowStep,
+      );
+      this.world.fillLayer.addChild(newBox.container);
+      column.push(newBox);
+    }
+
+    if (column.length && !column[0].container.destroyed) column[0].open();
+
+    let pending = 0;
+    for (let r = 0; r < Math.min(column.length, f.rowYs.length); r++) {
+      const box = column[r];
+      if (!box || box.container.destroyed) continue;
+      pending++;
+      tweenTo(
+        box.container,
+        { x: f.xs[col], y: f.rowYs[r] },
+        f.shiftDuration,
+        ease.quadInOut,
+        () => {
+          if (--pending <= 0) this.columnBusy[col] = false;
+        },
+      );
+    }
+    if (pending === 0) this.columnBusy[col] = false;
+  }
+
+  _checkAllFilled() {
+    if (ECONOMY.maxCycles <= 0) return;
+    const needed = ECONOMY.maxCycles * ECONOMY.rowColorSequence.length * 4;
+    if (this.totalFilled >= needed) this.onAllBoxesFilled?.();
+  }
+
+  getOpenBoxColors() {
+    const out = new Set();
+    for (const column of this.columns) {
+      const front = column[0];
+      if (front && !front.container.destroyed && front.isOpen) {
+        out.add(front.color);
+      }
+    }
+    return out;
   }
 
   update() {
-    const conveyor = this.world.conveyor;
-    const cells = conveyor.getOccupiedCells();
-    if (!cells.length) return;
-    const tol = LAYOUT.fillColumns.catchTolerance;
-
-    for (const cell of cells) {
-      const ball = cell.ball;
-      if (!ball || ball.takenByBox) continue;
-      // only the underside run passes over the trays; anywhere else the ball
-      // would have to be yanked sideways to reach one
-      if (!conveyor.isBottomSegment(cell.curDist)) continue;
-
-      let taken = false;
-      for (const col of this.columns) {
-        for (const tile of col.openTiles()) {
-          if (tile.isFilled || tile.color !== ball.color) continue;
-          const slot = tile.freeSlotNear(ball.x, tol);
-          if (slot < 0) continue;
-          tile.tryTake(ball, slot);
-          taken = true;
-          break;
-        }
-        if (taken) break;
+    if (this._queue.length) {
+      const jobs = this._queue;
+      this._queue = [];
+      for (const job of jobs) job();
+    }
+    for (const column of this.columns) {
+      for (const box of column) {
+        if (!box.container.destroyed) box.update();
       }
     }
   }
 
-  onTileFullyCleared() {
-    this.totalCleared++;
-    this.world.checkVictory();
+  // hit flash where a ball lands (the original's ParticleBallLitBeam prefab)
+  spawnHitEffect(parent, x, y, dur) {
+    const fx = new Sprite(this.world.textures.beam);
+    fx.anchor.set(0.5);
+    fx.position.set(x, y);
+    fx.width = F().hitEffectSize;
+    fx.height = F().hitEffectSize;
+    fx.alpha = 0;
+    parent.addChild(fx);
+    tweenTo(fx, { alpha: 1 }, dur, ease.sineOut, () =>
+      tweenTo(fx, { alpha: 0 }, dur, ease.sineIn, () => fx.destroy()),
+    );
   }
 
-  shuffle() {
-    const pool = [];
-    for (const col of this.columns) {
-      for (let i = 1; i < col.tiles.length; i++) pool.push(col.tiles[i]);
-    }
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      const ci = pool[i].color;
-      pool[i].color = pool[j].color;
-      pool[j].color = ci;
-      pool[i].close();
-      pool[j].close();
-    }
+  // full-box pop (the original's FillParticle prefab)
+  spawnFillEffect(parent, x, y) {
+    const fx = new Sprite(this.world.textures.shockwave);
+    fx.anchor.set(0.5);
+    fx.position.set(x, y);
+    fx.width = F().fillEffectSize;
+    fx.height = F().fillEffectSize;
+    fx.alpha = 0;
+    parent.addChild(fx);
+    tweenTo(fx, { alpha: 1 }, 0.3, ease.sineOut, () =>
+      tweenTo(fx, { alpha: 0 }, 0.3, ease.sineIn, () => fx.destroy()),
+    );
   }
 }

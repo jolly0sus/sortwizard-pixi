@@ -15,6 +15,13 @@ export const ease = {
   sineIn: (t) => 1 - Math.cos((t * Math.PI) / 2),
   sineInOut: (t) => -(Math.cos(Math.PI * t) - 1) / 2,
   linear: (t) => t,
+  quadInOut: (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2),
+  cubicOut: (t) => 1 - Math.pow(1 - t, 3),
+  elasticOut: (t) => {
+    const c4 = (2 * Math.PI) / 3;
+    if (t === 0 || t === 1) return t;
+    return Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * c4) + 1;
+  },
   bounceOut: (t) => {
     const n1 = 7.5625,
       d1 = 2.75;
@@ -66,6 +73,17 @@ export function delay(seconds, fn) {
   }, seconds * 1000);
   timers.add(id);
   return id;
+}
+
+// The original's Tween.stopAllByTarget: kill any in-flight tween driving the
+// given object (used when a tray snaps its balls into place mid-flight).
+export function stopTweensOf(obj) {
+  for (const rec of active) {
+    if (rec.obj === obj) {
+      rec.cancelled = true;
+      active.delete(rec);
+    }
+  }
 }
 
 // Tearing the scene down leaves tweens and timers pointing at destroyed

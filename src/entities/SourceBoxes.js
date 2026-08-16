@@ -1,288 +1,355 @@
-import { Container, Sprite, Text, TextStyle } from "pixi.js";
-import { LAYOUT, ECONOMY, PIPE_COLOR_BAGS } from "../config.js";
+// Port of the original Box.ts + BoxManager.ts.
+//
+// Three slots: slot 0 is the CENTRE pipe (starts pink), slot 1 the LEFT
+// (orange), slot 2 the RIGHT (blue). Each pipe can deliver 7 replacement
+// boxes; the figure on the pipe is that counter. Replacement colours come
+// from one global blue→pink→orange cycle indexed by boxes emptied so far,
+// regardless of which pipe they came out of.
+import { Container, Sprite, Text } from "pixi.js";
+import { LAYOUT, ECONOMY } from "../config.js";
+import { Ball } from "./Ball.js";
 import { audio } from "../audio.js";
-import { spawnFreeBall } from "./spawnBall.js";
 import { tweenTo, ease, delay } from "../tween.js";
 
-const numberStyle = new TextStyle({
-  fontFamily: "Azeret Mono, monospace",
-  fontWeight: "900",
-  fontSize: 46,
-  fill: 0xffffff,
-  stroke: { color: 0x6a1a9a, width: 8, join: "round" },
-});
+const B = () => LAYOUT.sourceBox;
 
-// A source box is a square cup holding a 3x3 grid of marbles (= the 9 balls
-// it launches), capped by a lid that pops off once it lands.
-class SourceBoxSlot {
-  constructor(index, world, initialColor) {
-    this.index = index;
-    this.world = world;
-    this.x = LAYOUT.pipes.xs[index];
-    // this pipe's whole stock of boxes; the number printed on it is how many
-    // balls are still to come out of it
-    this.bag = [...PIPE_COLOR_BAGS[index]];
-    this.boxesLeft = this.bag.length;
+class Box {
+  constructor(manager, slotIndex) {
+    this.manager = manager;
+    this.slotIndex = slotIndex;
+    this.world = manager.world;
+
+    const container = new Container();
+    this.container = container;
+    container.eventMode = "static";
+    container.cursor = "pointer";
+    container.on("pointertap", () => this._onTouched());
+
+    const t = this.world.textures;
+    this.shadow = new Sprite(t.trayShadow);
+    this.shadow.anchor.set(0.5);
+    this.cup = new Sprite();
+    this.cup.anchor.set(0.5);
+    this.marbles = new Sprite();
+    this.marbles.anchor.set(0.5);
+    this.lid = new Sprite();
+    this.lid.anchor.set(0.5);
+    container.addChild(this.shadow, this.cup, this.marbles, this.lid);
+
+    const s = B();
+    this.shadow.position.set(0, s.shadow.dy);
+    this.shadow.width = s.shadow.w;
+    this.shadow.height = s.shadow.h;
+    this.cup.position.set(0, s.cup.dy);
+    this.marbles.position.set(0, s.marbles.dy);
+    this.lid.position.set(0, s.lid.dy);
+
     this.color = null;
     this.isAnimating = false;
     this.ballsLaunched = 0;
-    this.totalBalls = ECONOMY.ballsPerBox;
+    this.alive = false;
 
-    const box = LAYOUT.sourceBox;
-
-    this.pipe = new Sprite(world.textures.pipe);
-    this.pipe.anchor.set(0.5, 0);
-    this.pipe.x = this.x;
-    this.pipe.y = LAYOUT.pipes.topY;
-    this.pipe.width = LAYOUT.pipes.width;
-    this.pipe.height = LAYOUT.pipes.bottomY - LAYOUT.pipes.topY;
-    world.boxLayer.addChild(this.pipe);
-
-    this.container = new Container();
-    this.container.x = this.x;
-    this.container.y = box.centerY;
-    this.container.eventMode = "static";
-    this.container.cursor = "pointer";
-    this.container.on("pointertap", () => this._onTap());
-
-    // soft contact shadow so the box sits on the board rather than floating
-    this.shadow = new Sprite(world.textures.trayShadow);
-    this.shadow.anchor.set(0.5);
-    this.shadow.width = box.w * 1.1;
-    this.shadow.height = box.h * 1.1;
-    this.shadow.y = 10;
-    this.shadow.alpha = 0.32;
-    this.container.addChild(this.shadow);
-
-    this.cup = new Sprite(world.textures.trayEmpty[initialColor]);
-    this.cup.anchor.set(0.5);
-    this.cup.width = box.w;
-    this.cup.height = box.h;
-    this.container.addChild(this.cup);
-
-    this.marbles = new Sprite(world.textures.trayMarbles[initialColor]);
-    this.marbles.anchor.set(0.5);
-    this.marbles.width = box.marbleW;
-    this.marbles.height = box.marbleH;
-    this.container.addChild(this.marbles);
-
-    this.lid = new Sprite(world.textures.trayInactive[initialColor]);
-    this.lid.anchor.set(0.5);
-    this.lid.width = box.w;
-    this.lid.height = box.h;
-    this.container.addChild(this.lid);
-
-    world.boxLayer.addChild(this.container);
-
-    this.label = new Text({ text: "0", style: numberStyle });
-    this.label.anchor.set(0.5);
-    this.label.x = this.x;
-    this.label.y = LAYOUT.pipes.labelY;
-    world.pipeLabelLayer.addChild(this.label);
-    this._updateLabel();
-
-    this._spawnBox(initialColor);
+    this.world.boxLayer.addChild(container);
   }
 
-  // Balls this pipe has still to give: the boxes behind it plus whatever is
-  // left in the one on screen. Counted per ball, so the figure ticks down as
-  // they actually fly out instead of dropping a whole box at a time.
-  _updateLabel() {
-    const left = this.boxesLeft * ECONOMY.ballsPerBox - this.ballsLaunched;
-    this.label.text = String(Math.max(0, left));
-  }
-
-  _spawnBox(color) {
-    const box = LAYOUT.sourceBox;
+  _applyColor(color) {
+    const t = this.world.textures;
+    const s = B();
     this.color = color;
-    this.ballsLaunched = 0;
-    this.isAnimating = false;
+    this.cup.texture = t.trayEmpty[color];
+    this.cup.width = s.cup.w;
+    this.cup.height = s.cup.h;
+    this.marbles.texture = t.trayMarbles[color];
+    this.marbles.width = s.marbles.w;
+    this.marbles.height = s.marbles.h;
+    this.lid.texture = t.trayInactive[color];
+    this.lid.width = s.lid.w;
+    this.lid.height = s.lid.h;
+    this._lidScaleX = this.lid.scale.x;
+    this._lidScaleY = this.lid.scale.y;
+  }
 
-    this.cup.texture = this.world.textures.trayEmpty[color];
-    this.marbles.texture = this.world.textures.trayMarbles[color];
-    this.lid.texture = this.world.textures.trayInactive[color];
-
+  placeInstant(color) {
+    this._applyColor(color);
+    const s = B();
+    this.container.position.set(s.slotXs[this.slotIndex], s.slotY);
+    this.container.scale.set(1);
+    this.container.rotation = 0;
+    this.container.visible = true;
+    this.lid.visible = false;
     this.marbles.visible = true;
     this.marbles.alpha = 1;
-    this.marbles.width = box.marbleW;
-    this.marbles.height = box.marbleH;
-    this.lid.visible = true;
-    this.lid.width = box.w;
-    this.lid.height = box.h;
-    this._lidScale = this.lid.scale.x;
+    this.isAnimating = false;
+    this.ballsLaunched = 0;
+    this.alive = true;
+  }
 
-    this.container.scale.set(0.5);
-    this.container.alpha = 1;
-    this.container.rotation = 0;
+  playEntryAnimation(color) {
+    this._applyColor(color);
+    const s = B();
     audio.playBoxAppear();
-    tweenTo(this.container.scale, { x: 1, y: 1 }, 0.35, ease.outBack, () =>
-      this._popLid(),
+    this.lid.visible = true;
+    this.lid.scale.set(this._lidScaleX, this._lidScaleY);
+    this.marbles.visible = true;
+    this.marbles.alpha = 1;
+    const targetY = s.slotY;
+    this.container.visible = true;
+    this.container.rotation = 0;
+    this.container.position.set(
+      s.slotXs[this.slotIndex],
+      targetY - s.entryDrop,
     );
+    this.container.scale.set(0.5);
+    this.isAnimating = true;
+    this.ballsLaunched = 0;
+    tweenTo(this.container, { y: targetY }, 0.35, ease.bounceOut);
+    tweenTo(this.container.scale, { x: 1, y: 1 }, 0.35, ease.bounceOut, () => {
+      this.isAnimating = false;
+      this.alive = true;
+      this._popLidOff();
+    });
   }
 
-  _onTap() {
-    if (this.isAnimating || this.ballsLaunched > 0) return;
-    if (!this.world.canLaunchBalls(this.color)) {
-      this._shake();
-      audio.playBoxTapBlocked();
-      return;
-    }
-    audio.playBoxTap();
-    this.world.tutorialHand?.onBoxTapped();
-    this._launchBalls();
-  }
-
-  _shake() {
-    if (this._shaking) return;
-    this._shaking = true;
-    const c = this.container;
-    const angles = [12, -12, 7, -7, 0];
-    let i = 0;
-    const step = () => {
-      tweenTo(
-        c,
-        { rotation: (angles[i] * Math.PI) / 180 },
-        0.07,
-        ease.sineInOut,
-        () => {
-          i++;
-          if (i < angles.length) step();
-          else this._shaking = false;
-        },
-      );
-    };
-    step();
-  }
-
-  _popLid() {
+  _popLidOff() {
     if (!this.lid.visible) return;
-    // the lid is sized via width/height, so its resting scale is not 1 —
-    // the pop has to be expressed relative to that
-    const s = this._lidScale;
     tweenTo(
       this.lid.scale,
-      { x: s * 1.05, y: s * 1.05 },
+      { x: this._lidScaleX * 1.05, y: this._lidScaleY * 1.05 },
       0.1,
-      ease.outQuad,
-      () => {
-        tweenTo(
-          this.lid.scale,
-          { x: 0, y: 0 },
-          0.12,
-          ease.inQuad,
-          () => (this.lid.visible = false),
-        );
-      },
+      ease.linear,
+      () =>
+        tweenTo(this.lid.scale, { x: 0, y: 0 }, 0.12, ease.inQuad, () => {
+          this.lid.visible = false;
+        }),
     );
+  }
+
+  _onTouched() {
+    this.manager.tapCounter?.registerTap();
+    if (this.isAnimating || this.ballsLaunched > 0 || !this.alive) return;
+    if (this.manager.canLaunchBalls()) {
+      audio.playBoxTap();
+      this.manager.tutorialHand?.onBoxTapped();
+      this._launchBalls();
+    } else {
+      this._playShake();
+    }
+  }
+
+  _playShake() {
+    if (this._isShaking) return;
+    this._isShaking = true;
+    audio.playBoxTapBlocked();
+    const deg = (d) => (d * Math.PI) / 180;
+    const c = this.container;
+    tweenTo(c, { rotation: deg(-12) }, 0.07, ease.outQuad, () =>
+      tweenTo(c, { rotation: deg(12) }, 0.07, ease.sineInOut, () =>
+        tweenTo(c, { rotation: deg(-7.2) }, 0.07, ease.sineInOut, () =>
+          tweenTo(c, { rotation: deg(7.2) }, 0.07, ease.sineInOut, () =>
+            tweenTo(c, { rotation: 0 }, 0.06, ease.outQuad, () => {
+              this._isShaking = false;
+            }),
+          ),
+        ),
+      ),
+    );
+  }
+
+  _spawnWorldPositions() {
+    const s = B();
+    const cx = this.container.x;
+    const cy = this.container.y;
+    // P1..P9 of the prefab: rows top/middle/bottom, third row right-to-left
+    const dx = s.spawnDX;
+    const rows = s.spawnRowDY;
+    const pts = [
+      [-dx, rows[0]],
+      [0, rows[0]],
+      [dx, rows[0]],
+      [-dx, rows[1]],
+      [0, rows[1]],
+      [dx, rows[1]],
+      [dx, rows[2]],
+      [0, rows[2]],
+      [-dx, rows[2]],
+    ];
+    return pts.map(([x, y]) => [cx + x, cy + y]);
   }
 
   _launchBalls() {
     this.isAnimating = true;
-    const world = this.world;
-    for (let i = 0; i < this.totalBalls; i++) {
-      delay(i * 0.08, () => {
+    this.ballsLaunched = 0;
+    const positions = this._spawnWorldPositions();
+    const total = ECONOMY.ballsPerBox;
+    // the box starts squashing 0.07 s before the last ball emerges
+    delay(Math.max(0, 0.08 * (total - 1) - 0.07), () => this._disappear());
+    for (let d = 0; d < total; d++) {
+      delay(0.08 * d, () => {
         if (this.container.destroyed) return;
-        spawnFreeBall(world, {
-          x: this.container.x + (Math.random() - 0.5) * 20,
-          y: this.container.y,
-          color: this.color,
-          vx: (Math.random() - 0.5) * 120,
-          vy: -80 - Math.random() * 40,
-          laneX: this.x,
-        });
+        const ball = Ball.spawn(this.world.textures, this.world.ballLayer);
+        ball.setColor(this.color);
+        ball.initPhysics();
+        this.world.physics.add(ball);
+        ball.playLaunchAnimation(positions[d][0], positions[d][1]);
         this.ballsLaunched++;
-        this._updateLabel();
-        // The cup is drawn holding nine marbles — what the box is worth once
-        // the x3 has done its work — so it empties a third at a time.
-        this.marbles.alpha = 1 - this.ballsLaunched / this.totalBalls;
-        if (this.ballsLaunched === this.totalBalls) {
-          delay(0.06, () => this._disappear());
-        }
+        if (this.ballsLaunched === total) this.marbles.visible = false;
       });
     }
   }
 
   _disappear() {
-    tweenTo(
-      this.container.scale,
-      { x: 1.1, y: 0.8 },
-      0.15,
-      ease.outQuad,
-      () => {
-        tweenTo(this.container.scale, { x: 0, y: 0 }, 0.2, ease.inQuad, () => {
-          this.container.visible = false;
-          this._onEmpty();
-        });
-      },
+    const c = this.container;
+    tweenTo(c.scale, { x: 1.1, y: 0.8 }, 0.15, ease.outQuad, () =>
+      tweenTo(c.scale, { x: 0, y: 0 }, 0.2, ease.inQuad, () => {
+        c.visible = false;
+        this.alive = false;
+        this.manager._onBoxEmpty(this.slotIndex);
+      }),
     );
   }
 
-  _onEmpty() {
-    this.boxesLeft--;
-    // the spent box's balls are already off the counter
-    this.ballsLaunched = 0;
-    this._updateLabel();
-    if (this.boxesLeft > 0) {
-      delay(0.2, () => {
-        this.container.visible = true;
-        this._spawnBox(this.takeFromBag());
-      });
-    } else {
-      this.world.checkVictory();
-    }
-  }
-
-  // Draw the next box out of this pipe's fixed stock, favouring whatever the
-  // open trays are short of. Only the *order* is adaptive — the bag's contents
-  // are fixed, so the per-colour balance with the trays is preserved.
-  takeFromBag() {
-    const demand = this.world.fillBoxManager?.getDemand() ?? new Map();
-    let bestIdx = 0;
-    let bestNeed = -1;
-    for (let i = 0; i < this.bag.length; i++) {
-      const need = demand.get(this.bag[i]) ?? 0;
-      if (need > bestNeed) {
-        bestNeed = need;
-        bestIdx = i;
-      }
-    }
-    return this.bag.splice(bestIdx, 1)[0];
+  // wand support in the original; unused here but kept for parity of API
+  forceReplace() {
+    if (this.isAnimating) return;
+    this.isAnimating = true;
+    this._disappear();
   }
 }
 
 export class SourceBoxManager {
   constructor(world) {
     this.world = world;
-    this.slots = [];
-    for (let i = 0; i < ECONOMY.pipes; i++) {
-      const slot = new SourceBoxSlot(i, world, PIPE_COLOR_BAGS[i][0]);
-      slot.bag.splice(0, 1);
-      this.slots.push(slot);
+    this.tapCounter = null; // wired by Game after construction
+    this.tutorialHand = world.tutorialHand;
+
+    this._buildPipes();
+
+    this.pipeCharges = [...ECONOMY.pipeCharges];
+    this.colorCycleIndex = 0;
+    this.boxes = [];
+    for (let i = 0; i < 3; i++) {
+      const box = new Box(this, i);
+      box.placeInstant(ECONOMY.slotColors[i]);
+      this.boxes.push(box);
+      this._updatePipeLabel(i);
+    }
+
+    this._failTriggered = false;
+    this._victoryTriggered = false;
+    this._allBoxesFilled = false;
+    this._failCheckTimer = 0;
+  }
+
+  _buildPipes() {
+    const P = LAYOUT.pipes;
+    const t = this.world.textures;
+    this.pipeLabels = [];
+    // pipes at [left, centre, right]; slots are [centre, left, right]
+    for (let i = 0; i < 3; i++) {
+      const pipe = new Sprite(t.pipe);
+      pipe.anchor.set(0.5);
+      pipe.position.set(P.xs[i], P.spriteY);
+      pipe.width = P.w;
+      pipe.height = P.h;
+      this.world.pipeLayer.addChild(pipe);
+
+      const label = new Text({
+        text: "",
+        style: {
+          fontFamily: "Azeret Mono",
+          fontWeight: "900",
+          fontSize: P.labelSize,
+          fill: 0xffffff,
+          stroke: { color: 0x000000, width: P.labelStroke, join: "round" },
+        },
+      });
+      label.anchor.set(0.5);
+      label.position.set(P.xs[i], P.labelY);
+      this.world.pipeLayer.addChild(label);
+      this.pipeLabels.push(label);
     }
   }
 
-  ballsLeft() {
-    return this.slots.reduce(
-      (n, s) => n + s.boxesLeft * ECONOMY.ballsPerBox,
-      0,
+  // slot index -> pipe visual index (slot0 = centre pipe)
+  _pipeForSlot(slot) {
+    return [1, 0, 2][slot];
+  }
+
+  _updatePipeLabel(slot) {
+    this.pipeLabels[this._pipeForSlot(slot)].text = String(
+      this.pipeCharges[slot],
     );
   }
 
-  allExhausted() {
-    return this.slots.every((s) => s.boxesLeft <= 0);
+  canLaunchBalls() {
+    return (
+      ECONOMY.maxFreeBalls <= 0 ||
+      Ball.getFreeBallCount() < ECONOMY.maxFreeBalls
+    );
   }
 
-  // Balls a tapped box has not spat out yet, as {color, count}. They are
-  // already spoken for — the tap has happened and they are on their way to the
-  // belt — so the deadlock check counts them instead of waiting out the drop
-  // and the x3 animation before admitting the run is over.
-  pendingByColor() {
-    const pending = new Map();
-    for (const s of this.slots) {
-      if (s.ballsLaunched <= 0 || s.ballsLaunched >= s.totalBalls) continue;
-      const owed = (s.totalBalls - s.ballsLaunched) * ECONOMY.multiplier;
-      pending.set(s.color, (pending.get(s.color) ?? 0) + owed);
+  getActiveBoxes() {
+    return this.boxes.filter((b) => b.alive);
+  }
+
+  _pickNextBoxColor() {
+    const seq = ECONOMY.spawnSequence;
+    const color = seq[this.colorCycleIndex % seq.length];
+    this.colorCycleIndex++;
+    return color;
+  }
+
+  _onBoxEmpty(slotIndex) {
+    if (this.pipeCharges[slotIndex] > 0) {
+      this.pipeCharges[slotIndex]--;
+      this._updatePipeLabel(slotIndex);
+      const color = this._pickNextBoxColor();
+      delay(0.2, () => this.boxes[slotIndex].playEntryAnimation(color));
+    } else {
+      delay(0.5, () => this._checkVictory());
     }
-    return pending;
+  }
+
+  onAllBoxesFilled() {
+    this._allBoxesFilled = true;
+    this._checkVictory();
+  }
+
+  update(dt) {
+    if (this._failTriggered || this._victoryTriggered) return;
+    this._failCheckTimer += dt;
+    if (this._failCheckTimer >= 0.5) {
+      this._failCheckTimer = 0;
+      this._checkFail();
+      this._checkVictory();
+    }
+  }
+
+  _checkVictory() {
+    if (!this._allBoxesFilled) return;
+    if (Ball.getTotalBallCount() > 0) return;
+    if (this._victoryTriggered || this._failTriggered) return;
+    this._victoryTriggered = true;
+    this.world.victoryWindow.show();
+  }
+
+  // Fail: the belt is completely full and none of the colours riding it can
+  // go into any currently open receiver box.
+  _checkFail() {
+    if (this._failTriggered || this._victoryTriggered) return;
+    const conveyor = this.world.conveyor;
+    if (!conveyor.cells.length) return;
+    if (!conveyor.isFull()) return;
+    const ridingColors = new Set();
+    for (const cell of conveyor.cells) {
+      const c = cell.getBallColor();
+      if (c) ridingColors.add(c);
+    }
+    const open = this.world.fillBoxManager.getOpenBoxColors();
+    for (const c of ridingColors) {
+      if (open.has(c)) return;
+    }
+    this._failTriggered = true;
+    this.world.failWindow.show();
   }
 }

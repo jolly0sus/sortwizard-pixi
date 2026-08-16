@@ -1,6 +1,8 @@
 import { LAYOUT } from "../config.js";
 
-const KEY = "sortwizard.layout";
+// v2: the layout switched to values converted straight from the original's
+// scene dump; stale v1 diffs must not merge over them.
+const KEY = "sortwizard.layout.v2";
 
 // A pristine copy taken before anything is applied, so "reset" always has
 // something true to go back to.

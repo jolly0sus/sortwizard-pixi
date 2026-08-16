@@ -40,7 +40,7 @@ export function mountHud(app, world) {
       const fps = Math.round((frames * 1000) / (now - since));
       el.textContent =
         `${fps} fps   worst ${worst.toFixed(0)}ms\n` +
-        `balls ${world.freeBalls.size + world.conveyor.getOccupiedCells().length}\n` +
+        `balls ${world.physics.balls.size}\n` +
         head;
       frames = 0;
       worst = 0;

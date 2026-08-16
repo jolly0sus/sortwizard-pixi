@@ -1,275 +1,345 @@
-import { Container, Sprite, Graphics, Text, TextStyle } from "pixi.js";
-import { DESIGN_W, DESIGN_H, LAYOUT } from "./config.js";
+// UI ports: TapCounter.ts (global tap counting, first-tap CTA reveal),
+// TutorialHand.ts (pointing glove with idle re-hints), the logo/CTA widgets,
+// and VictoryWindow.ts / FailWindow.ts.
+import { Container, Graphics, Sprite } from "pixi.js";
+import { DESIGN_H, LAYOUT, WINDOWS } from "./config.js";
 import { audio } from "./audio.js";
-import { tweenTo, ease, delay } from "./tween.js";
+import { tweenTo, ease, delay, stopTweensOf } from "./tween.js";
 
-export function buildLogo(root, textures) {
-  const logo = new Sprite(textures.logo);
-  logo.anchor.set(0, 1);
-  logo.x = LAYOUT.logo.x;
-  logo.y = LAYOUT.logo.y + 154;
-  logo.width = LAYOUT.logo.w;
-  logo.height = LAYOUT.logo.w * (textures.logo.height / textures.logo.width);
-  root.addChild(logo);
-  return logo;
-}
-
-const ctaTextStyle = new TextStyle({
-  fontFamily: "Azeret Mono, monospace",
-  fontWeight: "900",
-  fontSize: 26,
-  fill: 0xffffff,
-  stroke: { color: 0x0a5a1e, width: 5, join: "round" },
-});
-
-export function buildCTA(root, { label = "Play Now For Free", onClick } = {}) {
-  const c = LAYOUT.cta;
-  const container = new Container();
-  container.x = c.x + c.w / 2;
-  container.y = c.y + c.h / 2;
-  container.visible = false;
-  container.scale.set(0);
-  container.eventMode = "static";
-  container.cursor = "pointer";
-
-  const bg = new Graphics()
-    .roundRect(-c.w / 2, -c.h / 2, c.w, c.h, c.h / 2)
-    .fill({ color: 0x35c422 })
-    .stroke({ color: 0x1c7a10, width: 5, alignment: 1 });
-  container.addChild(bg);
-
-  const text = new Text({ text: label, style: ctaTextStyle });
-  text.anchor.set(0.5);
-  container.addChild(text);
-
-  container.on("pointertap", () => onClick?.());
-  root.addChild(container);
-  return container;
-}
-
-export function revealCTA(container) {
-  if (container.visible) return;
-  container.visible = true;
-  tweenTo(container.scale, { x: 1.15, y: 1.15 }, 0.15, ease.outBack, () => {
-    tweenTo(container.scale, { x: 1, y: 1 }, 0.1, ease.sineOut, () =>
-      startPulse(container),
-    );
-  });
-}
-
-function startPulse(container) {
-  const loop = () => {
-    tweenTo(container.scale, { x: 1.08, y: 1.08 }, 0.6, ease.sineInOut, () => {
-      tweenTo(container.scale, { x: 1, y: 1 }, 0.6, ease.sineInOut, loop);
-    });
-  };
-  loop();
-}
-
-// Global tap counter: reveals the persistent CTA after the first tap
-// anywhere, and fires onRedirect after N total taps (mirrors TapCounter.ts).
+// ---------------------------------------------------------------------------
+// TapCounter — counts every tap anywhere (deduped against the box handler's
+// explicit registerTap within 120 ms), reveals the CTA on tap #1 and calls
+// the store redirect from tap #tapsToRedirect on. The shipped playable sets
+// the threshold to 1000, so in practice only the reveal matters.
+// ---------------------------------------------------------------------------
 export class TapCounter {
-  constructor(stage, cta, { tapsToRedirect = 5, onRedirect } = {}) {
-    this.count = 0;
+  constructor(canvas, { tapsToRedirect = 1000, onFirstTap, onRedirect } = {}) {
     this.tapsToRedirect = tapsToRedirect;
+    this.onFirstTap = onFirstTap;
     this.onRedirect = onRedirect;
-    this.cta = cta;
-    stage.eventMode = "static";
-    stage.hitArea = { contains: () => true };
-    stage.on("pointerdown", () => this._tap());
+    this._count = 0;
+    this._lastTapTime = -1;
+    // A DOM listener, not a stage hitArea: in Pixi v8 a hitArea on the stage
+    // would swallow hit-testing for every interactive child.
+    canvas.addEventListener("pointerup", () => this._tryCount(), {
+      passive: true,
+    });
   }
+
   registerTap() {
-    this._tap();
+    this._tryCount();
   }
-  _tap() {
-    this.count++;
-    if (this.count === 1) revealCTA(this.cta);
-    if (this.count >= this.tapsToRedirect) this.onRedirect?.();
+
+  _tryCount() {
+    const now = Date.now();
+    if (this._lastTapTime >= 0 && now - this._lastTapTime < 120) return;
+    this._lastTapTime = now;
+    this._count++;
+    if (this._count === 1) this.onFirstTap?.();
+    if (this._count >= this.tapsToRedirect) this.onRedirect?.();
   }
 }
 
+// ---------------------------------------------------------------------------
+// Tutorial hand
+// ---------------------------------------------------------------------------
 export class TutorialHand {
-  constructor(root, textures) {
-    this.container = new Container();
-    this.container.visible = false;
-    this.container.scale.set(0);
-    root.addChild(this.container);
-
-    // texture is trimmed to the hand itself, so these are its real on-screen
-    // dimensions; anchor sits on the fingertip
-    this.sprite = new Sprite(textures.gloveHover);
-    this.sprite.anchor.set(0.3, 0.04);
-    this.sprite.width = 112;
-    this.sprite.height = 158;
-    this.container.addChild(this.sprite);
+  constructor(layer, textures, world) {
     this.textures = textures;
+    this.world = world;
+    const H = LAYOUT.ui.hand;
 
-    this._visible = false;
-    this._bobTimer = 0;
-    this._target = null;
-    this._base = { x: 0, y: 0 };
+    this.node = new Container();
+    this.glove = new Sprite(textures.gloveHover);
+    this.glove.anchor.set(0.5);
+    this.glove.position.set(H.glove.dx, H.glove.dy);
+    this.glove.width = H.glove.w;
+    this.glove.height = H.glove.h;
+    this.node.addChild(this.glove);
+    this.node.visible = true;
+    this.node.alpha = 0;
+    this.node.scale.set(0);
+    layer.addChild(this.node);
+
+    this.visible = false;
+    this.firstTapDone = false;
+    this.idleTimer = 0;
+    this.bobTimer = 0;
+    this.baseX = 0;
+    this.baseY = 0;
+    this.currentTarget = null;
   }
 
-  pointAt(node) {
-    this._target = node;
-    this._base = { x: node.x + 40, y: node.y - 30 };
-    this.container.x = this._base.x;
-    this.container.y = this._base.y;
-    this.sprite.texture = this.textures.gloveHover;
-    if (!this._visible) this._show();
+  _setGlove(texture) {
+    const H = LAYOUT.ui.hand;
+    this.glove.texture = texture;
+    this.glove.width = H.glove.w;
+    this.glove.height = H.glove.h;
+  }
+
+  pointAt(target) {
+    const H = LAYOUT.ui.hand;
+    this.currentTarget = target;
+    this.bobTimer = 0;
+    this.baseX = target.x + H.offX;
+    this.baseY = target.y + H.offY;
+    this.node.position.set(this.baseX, this.baseY);
+    this._setGlove(this.textures.gloveHover);
+    if (!this.visible) this._show();
+  }
+
+  _pointAtSmooth(target) {
+    const H = LAYOUT.ui.hand;
+    this.currentTarget = target;
+    this.bobTimer = 0;
+    this.baseX = target.x + H.offX;
+    this.baseY = target.y + H.offY;
+    if (!this.visible) {
+      this.node.position.set(this.baseX, this.baseY);
+      this._show();
+      return;
+    }
+    stopTweensOf(this.node);
+    tweenTo(this.node, { x: this.baseX, y: this.baseY }, 0.3, ease.sineInOut);
   }
 
   _show() {
-    this._visible = true;
-    this.container.visible = true;
-    tweenTo(this.container.scale, { x: 1, y: 1 }, 0.35, ease.outBack);
+    if (this.visible) return;
+    this.visible = true;
+    stopTweensOf(this.node);
+    stopTweensOf(this.node.scale);
+    this.node.scale.set(0.5);
+    this.node.alpha = 0;
+    const d = LAYOUT.ui.hand.animDuration;
+    tweenTo(this.node.scale, { x: 1, y: 1 }, d, ease.outBack);
+    tweenTo(this.node, { alpha: 1 }, d, ease.sineOut);
   }
 
   hide() {
-    if (!this._visible) return;
-    this._visible = false;
-    tweenTo(
-      this.container.scale,
-      { x: 0, y: 0 },
-      0.3,
-      ease.inBack,
-      () => (this.container.visible = false),
-    );
+    if (!this.visible) return;
+    this.visible = false;
+    this.currentTarget = null;
+    stopTweensOf(this.node);
+    stopTweensOf(this.node.scale);
+    const d = LAYOUT.ui.hand.animDuration;
+    tweenTo(this.node.scale, { x: 0, y: 0 }, d, ease.inBack);
+    tweenTo(this.node, { alpha: 0 }, d, ease.sineIn);
   }
 
   onBoxTapped() {
-    if (!this._visible) return;
-    this.sprite.texture = this.textures.gloveClick1;
-    delay(0.1, () => {
-      this.sprite.texture = this.textures.gloveClick2;
-      delay(0.15, () => this.hide());
-    });
+    this.firstTapDone = true;
+    this.idleTimer = 0;
+    if (!this.visible) return;
+    this._setGlove(this.textures.gloveClick1);
+    delay(0.1, () => this._setGlove(this.textures.gloveClick2));
+    delay(0.2, () => this._setGlove(this.textures.gloveHover));
+    delay(0.25, () => this.hide());
+  }
+
+  pointAtCTA(target) {
+    this.firstTapDone = false;
+    this.idleTimer = 0;
+    if (!target) return;
+    if (this.visible) this._pointAtSmooth(target);
+    else this.pointAt(target);
+  }
+
+  showInitialHint() {
+    const mgr = this.world.sourceBoxManager;
+    if (!mgr.canLaunchBalls()) return;
+    const boxes = mgr.getActiveBoxes();
+    const blue = boxes.find((b) => b.color === "blue");
+    const box = blue ?? boxes[0];
+    if (box) this.pointAt(box.container);
+  }
+
+  _showIdleHint() {
+    const mgr = this.world.sourceBoxManager;
+    if (!mgr.canLaunchBalls()) return;
+    const open = this.world.fillBoxManager.getOpenBoxColors();
+    if (!open.size) return;
+    const box = mgr.getActiveBoxes().find((b) => open.has(b.color));
+    if (box) this.pointAt(box.container);
   }
 
   update(dt) {
-    if (!this._visible || !this._target) return;
-    this._bobTimer += dt;
-    const off = Math.sin((this._bobTimer / 0.9) * Math.PI * 2) * 10;
-    this.container.y = this._base.y + off;
+    const H = LAYOUT.ui.hand;
+    if (this.visible && !this.world.sourceBoxManager.canLaunchBalls()) {
+      this.hide();
+    }
+    if (this.firstTapDone) {
+      this.idleTimer += dt;
+      if (this.idleTimer >= H.idleTimeout) {
+        this.idleTimer = 0;
+        this._showIdleHint();
+      }
+    }
+    if (this.visible && this.currentTarget) {
+      this.bobTimer += dt;
+      const t =
+        Math.sin((this.bobTimer / H.bobPeriod) * Math.PI * 2) * H.bobAmp;
+      this.node.position.set(this.baseX, this.baseY + t);
+    }
   }
 }
 
-const popupLabelStyle = new TextStyle({
-  fontFamily: "Azeret Mono, monospace",
-  fontWeight: "900",
-  fontSize: 30,
-  fill: 0xffffff,
-  stroke: { color: 0x0a5a1e, width: 5, join: "round" },
-});
+// ---------------------------------------------------------------------------
+// Logo + CTA (widget-anchored to the visible rect; Game re-lays them on fit)
+// ---------------------------------------------------------------------------
+export function buildLogo(layer, textures) {
+  const L = LAYOUT.ui.logo;
+  const logo = new Sprite(textures.logo);
+  logo.anchor.set(0.5);
+  logo.width = L.w;
+  logo.height = L.h;
+  layer.addChild(logo);
+  logo.layoutWidget = (left) => {
+    logo.position.set(left + L.left + L.w / 2, DESIGN_H - L.bottom - L.h / 2);
+  };
+  return logo;
+}
 
-export function buildPopup(root, textures, { kind, onCta } = {}) {
-  const container = new Container();
-  container.visible = false;
-  root.addChild(container);
-
-  // Fill at full alpha and fade the node instead — a zero-alpha fill would
-  // stay invisible no matter what the tween does to the node's alpha.
-  //
-  // Drawn far past the design rect on every side. The stage is letterboxed:
-  // scaled to fit and centred, with no mask, so on any screen whose aspect
-  // ratio is not exactly 750x1624 there are bands outside those bounds. A
-  // backdrop of exactly DESIGN_W x DESIGN_H leaves them undimmed and the
-  // overlay stops visibly short of the edges. The overscan costs nothing —
-  // it is a flat fill — and covers anything up to a 5:1 screen.
-  const OVERSCAN = 2;
-  const backdrop = new Graphics()
-    .rect(
-      -DESIGN_W * OVERSCAN,
-      -DESIGN_H * OVERSCAN,
-      DESIGN_W * (1 + 2 * OVERSCAN),
-      DESIGN_H * (1 + 2 * OVERSCAN),
-    )
-    .fill({ color: 0x000000 });
-  backdrop.alpha = 0;
-  container.addChild(backdrop);
-
-  const centerX = DESIGN_W / 2;
-  // Centred in the upper board section, which ends where the traced silhouette
-  // starts closing into the funnel. Read from the profile rather than from a
-  // constant: the outline is traced off the reference and re-traceable, and the
-  // constant this used to read (board.bottomTop) went away with the modelled
-  // shape — leaving centerY as NaN, which parked the badge and the button
-  // nowhere at all. The backdrop still faded in, so a lost run dimmed the
-  // screen and showed nothing else.
-  const funnelTop = LAYOUT.board.profile[0][0];
-  const centerY = LAYOUT.board.y + (funnelTop - LAYOUT.board.y) / 2;
-
-  let badge;
-  if (kind === "fail") {
-    badge = new Sprite(textures.failButton);
-    badge.anchor.set(0.5);
-    badge.width = badge.height = 420;
-  } else {
-    badge = new Sprite(textures.logo);
-    badge.anchor.set(0.5);
-    badge.width = 420;
-    badge.height = 420 * (textures.logo.height / textures.logo.width);
-  }
-  badge.x = centerX;
-  badge.y = centerY;
-  container.addChild(badge);
-  // width/height leave the sprite at a fractional scale, so the pop-in has to
-  // animate back to *that*, not to 1 — otherwise it snaps to texture size.
-  const badgeScale = badge.scale.x;
-
-  const cta = new Container();
-  cta.x = centerX;
-  cta.y = centerY + 300;
+export function buildCTA(layer, textures, { onClick } = {}) {
+  const C = LAYOUT.ui.cta;
+  const cta = new Sprite(textures.cta);
+  cta.anchor.set(0.5);
+  cta.width = C.w;
+  cta.height = C.h;
+  cta.visible = false;
+  cta.scale.set(0);
   cta.eventMode = "static";
   cta.cursor = "pointer";
-  const ctaBg = new Graphics()
-    .roundRect(-160, -45, 320, 90, 45)
-    .fill({ color: 0x35c422 })
-    .stroke({ color: 0x1c7a10, width: 6 });
-  cta.addChild(ctaBg);
-  const ctaText = new Text({
-    text: "Play Now For Free",
-    style: popupLabelStyle,
-  });
-  ctaText.anchor.set(0.5);
-  ctaText.scale.set(0.75);
-  cta.addChild(ctaText);
-  cta.on("pointertap", () => onCta?.());
-  container.addChild(cta);
-
-  return {
-    container,
-    show() {
-      container.visible = true;
-      backdrop.alpha = 0;
-      badge.scale.set(0);
-      cta.scale.set(0);
-      kind === "fail" ? audio.playFail() : audio.playVictory();
-      tweenTo(backdrop, { alpha: 0.7 }, 0.4, ease.sineInOut);
-      delay(0.4, () => {
-        tweenTo(
-          badge.scale,
-          { x: badgeScale, y: badgeScale },
-          0.45,
-          ease.bounceOut,
-        );
-        delay(0.1, () => {
-          tweenTo(cta.scale, { x: 1, y: 1 }, 0.45, ease.bounceOut, () => {
-            const loop = () => {
-              tweenTo(
-                cta.scale,
-                { x: 1.08, y: 1.08 },
-                0.6,
-                ease.sineInOut,
-                () => {
-                  tweenTo(cta.scale, { x: 1, y: 1 }, 0.6, ease.sineInOut, loop);
-                },
-              );
-            };
-            loop();
-          });
-        });
-      });
-    },
+  cta.on("pointertap", () => onClick?.());
+  layer.addChild(cta);
+  cta.layoutWidget = (left, right) => {
+    cta.position.set(right - C.right - C.w / 2, DESIGN_H - C.bottom - C.h / 2);
   };
+
+  let revealed = false;
+  cta.reveal = () => {
+    if (revealed) return;
+    revealed = true;
+    const sx = C.w / cta.texture.width;
+    const sy = C.h / cta.texture.height;
+    cta.visible = true;
+    cta.scale.set(0);
+    tweenTo(cta.scale, { x: sx * 1.15, y: sy * 1.15 }, 0.15, ease.outBack, () =>
+      tweenTo(cta.scale, { x: sx, y: sy }, 0.1, ease.sineOut),
+    );
+  };
+  return cta;
+}
+
+// ---------------------------------------------------------------------------
+// Victory / Fail windows
+// ---------------------------------------------------------------------------
+export function buildVictoryWindow(layer, textures, world) {
+  const V = LAYOUT.ui.victory;
+  const win = new Container();
+  win.visible = false;
+  layer.addChild(win);
+
+  const dark = new Graphics();
+  dark
+    .rect(375 - V.darkW / 2, 812 - V.darkH / 2, V.darkW, V.darkH)
+    .fill(0x000000);
+  dark.alpha = 0;
+  dark.eventMode = "static"; // swallow touches like the original backdrop
+  win.addChild(dark);
+
+  const logo = new Sprite(textures.logo);
+  logo.anchor.set(0.5);
+  logo.position.set(375, V.logo.y);
+  win.addChild(logo);
+
+  const cta = new Sprite(textures.cta);
+  cta.anchor.set(0.5);
+  cta.position.set(375, V.cta.y);
+  cta.eventMode = "static";
+  cta.cursor = "pointer";
+  win.addChild(cta);
+
+  const logoScale = {
+    x: V.logo.w / logo.texture.width,
+    y: V.logo.h / logo.texture.height,
+  };
+  const ctaScale = {
+    x: V.cta.w / cta.texture.width,
+    y: V.cta.h / cta.texture.height,
+  };
+
+  win.show = () => {
+    win.visible = true;
+    dark.alpha = 0;
+    logo.scale.set(0);
+    cta.scale.set(0);
+    audio.playVictory();
+    world.tutorialHand?.pointAtCTA(cta);
+    tweenTo(
+      dark,
+      { alpha: WINDOWS.backdropOpacity },
+      WINDOWS.backdropFadeDuration,
+      ease.sineInOut,
+    );
+    delay(0.5 * WINDOWS.backdropFadeDuration + WINDOWS.popInDelay, () => {
+      tweenTo(logo.scale, logoScale, WINDOWS.popInDuration, ease.bounceOut);
+      tweenTo(
+        cta.scale,
+        { x: ctaScale.x, y: ctaScale.y },
+        WINDOWS.popInDuration,
+        ease.bounceOut,
+        () => {
+          const pulse = () =>
+            tweenTo(
+              cta.scale,
+              {
+                x: ctaScale.x * WINDOWS.ctaPulseScale,
+                y: ctaScale.y * WINDOWS.ctaPulseScale,
+              },
+              WINDOWS.ctaPulseDuration,
+              ease.sineInOut,
+              () =>
+                tweenTo(
+                  cta.scale,
+                  ctaScale,
+                  WINDOWS.ctaPulseDuration,
+                  ease.sineInOut,
+                  pulse,
+                ),
+            );
+          pulse();
+        },
+      );
+    });
+  };
+  return win;
+}
+
+export function buildFailWindow(layer, textures, world) {
+  const F = LAYOUT.ui.fail;
+  const win = new Container();
+  win.visible = false;
+  layer.addChild(win);
+
+  // The original FailWindow has no visible backdrop (its Dark sprite has no
+  // frame assigned) and its CTA node is inactive — just the FAIL badge.
+  const badge = new Sprite(textures.failButton);
+  badge.anchor.set(0.5);
+  badge.position.set(375, F.badge.y);
+  win.addChild(badge);
+  const badgeScale = {
+    x: F.badge.w / badge.texture.width,
+    y: F.badge.h / badge.texture.height,
+  };
+
+  win.show = () => {
+    win.visible = true;
+    badge.scale.set(0);
+    audio.playFail();
+    world.tutorialHand?.pointAtCTA(null);
+    delay(0.5 * WINDOWS.backdropFadeDuration + WINDOWS.popInDelay, () => {
+      tweenTo(badge.scale, badgeScale, WINDOWS.popInDuration, ease.bounceOut);
+    });
+  };
+  return win;
 }

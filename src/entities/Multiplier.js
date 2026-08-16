@@ -1,193 +1,244 @@
-import { Container, Graphics, Text, TextStyle, Sprite } from "pixi.js";
-import { LAYOUT } from "../config.js";
+// Port of the original Multiplier.ts and the multiplier bar's visual prefab.
+//
+// Three pills. Each is a thin sensor line under the bar: an eligible ball
+// crossing it keeps falling while two clones pop in just above the contact
+// point (x3 total), the bar flashes its "multiply" animation, and all three
+// balls play their glow pulse. Clones never multiply again.
+import { Container, Sprite, Text } from "pixi.js";
+import { LAYOUT, BALL_DIAMETER } from "../config.js";
+import { Ball } from "./Ball.js";
 import { audio } from "../audio.js";
-import { spawnFreeBall } from "./spawnBall.js";
 import { tweenTo, ease } from "../tween.js";
 
-const SPARKS_PER_PILL = 8;
+const M = () => LAYOUT.multiplier;
 
-const labelStyle = new TextStyle({
-  fontFamily: "Azeret Mono, monospace",
-  fontWeight: "900",
-  fontSize: 30,
-  fill: 0xffffff,
-  stroke: { color: 0x0a4a8a, width: 6, join: "round" },
-});
-
-// Three forcefield pills sitting edge to edge to form one continuous bar,
-// with a star/moon post standing at every pill boundary. A ball falling
-// through a pill is tripled.
-export class Multiplier {
-  constructor(world) {
+class Pill {
+  constructor(world, layer, x) {
     this.world = world;
-    const m = LAYOUT.multiplier;
-    this.y = m.centerY;
-    this.halfW = m.pillW / 2;
-    this.spans = LAYOUT.pipes.xs.map((x) => [x - this.halfW, x + this.halfW]);
+    this.x = x;
+    const m = M();
+    const t = world.textures;
 
-    this.layer = new Container();
-    world.pipeLabelLayer.addChild(this.layer);
+    const root = new Container();
+    root.position.set(x, m.y);
+    layer.addChild(root);
+    this.root = root;
 
-    // shadow cast by the whole bar onto the board
-    for (const x of LAYOUT.pipes.xs) {
-      const shade = new Sprite(world.textures.multShadow);
-      shade.anchor.set(0.5);
-      shade.width = m.pillW * 1.15;
-      shade.height = m.pillH * 0.9;
-      shade.x = x;
-      shade.y = this.y + m.pillH * 0.55;
-      shade.alpha = 0.3;
-      this.layer.addChild(shade);
+    // shadows
+    const shadow = new Sprite(t.multShadow);
+    shadow.anchor.set(0.5);
+    shadow.position.set(0, m.shadow.dy);
+    shadow.width = m.shadow.w;
+    shadow.height = m.shadow.h;
+    root.addChild(shadow);
+    for (const side of [-1, 1]) {
+      const post = new Sprite(t.multShadowPost);
+      post.anchor.set(0.5);
+      post.position.set(side * m.shadowPost.dx, m.shadowPost.dy);
+      post.width = m.shadowPost.w;
+      post.height = m.shadowPost.h;
+      root.addChild(post);
     }
 
-    for (const x of LAYOUT.pipes.xs) {
-      const field = new Sprite(world.textures.forcefield);
-      field.anchor.set(0.5);
-      field.width = m.pillW;
-      field.height = m.pillH;
-      field.x = x;
-      field.y = this.y;
-      this.layer.addChild(field);
+    // forcefield body + its lighter top band
+    this.field = new Sprite(t.forcefield);
+    this.field.anchor.set(0.5);
+    this.field.width = m.forcefield.w;
+    this.field.height = m.forcefield.h;
+    root.addChild(this.field);
+    this.fieldTop = new Sprite(t.forcefieldTop);
+    this.fieldTop.anchor.set(0.5);
+    this.fieldTop.position.set(0, m.forcefieldTop.dy);
+    this.fieldTop.width = m.forcefieldTop.w;
+    this.fieldTop.height = m.forcefieldTop.h;
+    root.addChild(this.fieldTop);
+
+    // ambient lightning, always crackling inside the field
+    this.bolts = [];
+    for (let i = 0; i < 3; i++) {
+      const bolt = new Sprite(
+        t.lightning[Math.floor(Math.random() * t.lightning.length)],
+      );
+      bolt.anchor.set(0.5);
+      bolt.blendMode = "add";
+      bolt.rotation = Math.PI / 2;
+      bolt.alpha = 0;
+      root.addChild(bolt);
+      this.bolts.push({
+        sprite: bolt,
+        timer: Math.random() * 0.4,
+      });
     }
 
-    // posts at every pill edge (adjacent pills therefore show a pair)
-    const postLayer = new Container();
-    this.layer.addChild(postLayer);
-    for (const x of LAYOUT.pipes.xs) {
-      for (const px of [x - this.halfW, x + this.halfW]) {
-        const post = new Sprite(world.textures.multPost);
-        post.anchor.set(0.5);
-        post.width = m.postW;
-        post.height = m.postH;
-        post.x = px;
-        post.y = this.y;
-        postLayer.addChild(post);
-
-        const knob = new Sprite(world.textures.multPostBall);
-        knob.anchor.set(0.5);
-        knob.width = m.postW * 0.92;
-        knob.height = m.postW * 0.92;
-        knob.x = px;
-        knob.y = this.y - m.postH / 2;
-        postLayer.addChild(knob);
-      }
+    // posts with their moon knobs, standing at both pill edges
+    for (const side of [-1, 1]) {
+      const post = new Sprite(t.multPost);
+      post.anchor.set(0.5);
+      post.position.set(side * m.post.dx, 0);
+      post.width = m.post.w;
+      post.height = m.post.h;
+      root.addChild(post);
+      const knob = new Sprite(t.multPostBall);
+      knob.anchor.set(0.5);
+      knob.position.set(side * m.post.dx, m.postBall.dy);
+      knob.width = m.postBall.w;
+      knob.height = m.postBall.h;
+      root.addChild(knob);
     }
 
-    // Drifting bolts and sparkles inside each pill — the "white swirls on
-    // water" the original animates across its forcefields. Clipped to the
-    // pill so nothing leaks out over the board.
-    this._t = 0;
-    this.sparks = [];
-    const fxLayer = new Container();
-    this.layer.addChild(fxLayer);
+    const label = new Text({
+      text: "x3",
+      style: {
+        fontFamily: "Azeret Mono",
+        fontWeight: "900",
+        fontSize: m.labelSize,
+        fill: 0xffffff,
+        stroke: {
+          color: m.labelStrokeColor,
+          width: m.labelStroke,
+          join: "round",
+        },
+      },
+    });
+    label.anchor.set(0.5);
+    root.addChild(label);
 
-    for (const x of LAYOUT.pipes.xs) {
-      const clip = new Container();
-      const mask = new Graphics()
-        .roundRect(
-          x - m.pillW / 2 + 3,
-          this.y - m.pillH / 2 + 3,
-          m.pillW - 6,
-          m.pillH - 6,
-          12,
-        )
-        .fill(0xffffff);
-      fxLayer.addChild(mask);
-      clip.mask = mask;
-      fxLayer.addChild(clip);
+    // the white flash the "multiply" clip plays over the field
+    this.flash = new Sprite(t.forcefield);
+    this.flash.anchor.set(0.5);
+    this.flash.blendMode = "add";
+    this.flash.width = m.forcefield.w;
+    this.flash.height = m.forcefield.h;
+    this.flash.alpha = 0;
+    root.addChildAt(this.flash, root.getChildIndex(this.fieldTop) + 1);
 
-      for (let i = 0; i < SPARKS_PER_PILL; i++) {
-        const isBolt = i % 2 === 0;
-        const spr = new Sprite(
-          isBolt
-            ? world.textures.lightning[i % world.textures.lightning.length]
-            : world.textures.sparkle,
-        );
-        spr.anchor.set(0.5);
-        spr.scale.set(
-          isBolt ? 0.2 + Math.random() * 0.16 : 0.25 + Math.random() * 0.22,
-        );
-        spr.blendMode = "add";
-        clip.addChild(spr);
-        this.sparks.push({
-          spr,
-          minX: x - m.pillW / 2,
-          span: m.pillW,
-          offX: Math.random() * m.pillW,
-          baseY: this.y + (Math.random() - 0.5) * (m.pillH - 16),
-          speed: 12 + Math.random() * 26,
-          phase: Math.random() * Math.PI * 2,
-          rate: 1.5 + Math.random() * 2.2,
-          peak: isBolt ? 0.7 : 0.9,
-        });
-      }
-    }
-
-    for (const x of LAYOUT.pipes.xs) {
-      const label = new Text({ text: "x3", style: labelStyle });
-      label.anchor.set(0.5);
-      label.x = x;
-      label.y = this.y;
-      this.layer.addChild(label);
-    }
-  }
-
-  _animateSparks(dt) {
-    this._t += dt;
-    for (const s of this.sparks) {
-      s.offX = (s.offX + s.speed * dt) % s.span;
-      const wave = Math.sin(this._t * s.rate + s.phase);
-      s.spr.x = s.minX + s.offX;
-      s.spr.y = s.baseY + wave * 3;
-      s.spr.alpha = s.peak * (0.2 + 0.8 * (0.5 + 0.5 * wave));
-    }
-  }
-
-  _inPill(x) {
-    return this.spans.some(([a, b]) => x >= a && x <= b);
+    this._flashT = -1;
   }
 
   update(dt) {
-    this._animateSparks(dt);
-    for (const ball of this.world.freeBalls) {
-      if (ball.alreadyMultiplied) continue;
-      if (ball.vy <= 0) continue; // only while falling downward
-      if (ball.y < this.y) continue;
-      if (!this._inPill(ball.x)) continue;
-      ball.alreadyMultiplied = true;
-      this._trigger(ball);
+    const m = M();
+    // ambient bolts: short random flickers at random spots inside the field
+    for (const b of this.bolts) {
+      b.timer -= dt;
+      if (b.timer <= 0) {
+        const t = this.world.textures;
+        b.sprite.texture =
+          t.lightning[Math.floor(Math.random() * t.lightning.length)];
+        b.sprite.position.set(
+          (Math.random() - 0.5) * (m.forcefield.w - 40),
+          (Math.random() - 0.5) * m.forcefield.h * 0.4,
+        );
+        const s = 0.35 + Math.random() * 0.3;
+        b.sprite.height = m.forcefield.w * s;
+        b.sprite.width = m.forcefield.h * (0.5 + Math.random() * 0.3);
+        b.sprite.alpha = 0.5 + Math.random() * 0.5;
+        b.timer = 0.05 + Math.random() * 0.35;
+      } else {
+        b.sprite.alpha *= Math.pow(0.02, dt); // fast decay
+      }
+    }
+    // the "multiply" flash: a 0.5 s additive pulse over the field
+    if (this._flashT >= 0) {
+      this._flashT += dt;
+      const k = Math.min(1, this._flashT / 0.5);
+      this.flash.alpha = Math.sin(k * Math.PI) * 0.55;
+      if (k >= 1) {
+        this._flashT = -1;
+        this.flash.alpha = 0;
+      }
     }
   }
 
-  _trigger(ball) {
+  playMultiplyAnim() {
+    this._flashT = 0;
+    // burst of bolts on hit
+    for (const b of this.bolts) b.timer = 0;
+  }
+}
+
+export class Multiplier {
+  constructor(world, layer) {
+    this.world = world;
+    this.pills = M().xs.map((x) => new Pill(world, layer, x));
+    this._nextTick = [];
+  }
+
+  update(dt) {
+    if (this._nextTick.length) {
+      const jobs = this._nextTick;
+      this._nextTick = [];
+      for (const job of jobs) job();
+    }
+    for (const pill of this.pills) pill.update(dt);
+
+    // the sensor line: an eligible falling ball crossing it multiplies once
+    const m = M();
+    const r = BALL_DIAMETER / 2;
+    for (const ball of Ball.getFreeBalls()) {
+      if (ball.spawnedByMultiplier || ball.alreadyMultiplied) continue;
+      if (Math.abs(ball.y - m.sensorY) > m.sensorHalfH + r) continue;
+      for (const pill of this.pills) {
+        if (Math.abs(ball.x - pill.x) > m.sensorHalfW + r) continue;
+        ball.alreadyMultiplied = true;
+        this._nextTick.push(() => this._triggerMultiply(ball, pill));
+        break;
+      }
+    }
+  }
+
+  _triggerMultiply(ball, pill) {
+    if (!ball || ball.destroyed) return;
+    const contactX = ball.x;
+    const contactY = ball.y;
+    pill.playMultiplyAnim();
     audio.playMultiplier();
-    this._popFx(ball.x, ball.y);
-    for (const deg of [120, 240]) {
-      const rad = (deg * Math.PI) / 180;
-      const offset = 40;
-      spawnFreeBall(this.world, {
-        x: ball.x + Math.sin(rad) * offset,
-        y: ball.y - Math.cos(rad) * offset,
-        color: ball.color,
-        vx: (Math.random() - 0.5) * 120,
-        vy: -40,
-        alreadyMultiplied: true,
-        // children stay in the parent's column so they clear the same pill
-        laneX: ball.laneX,
-      });
+    ball.playGlowEffect();
+    // the touched ball moves to the upper ball layer, keeping its position
+    this.world.ballLayer2.addChild(ball);
+    this._spawnContactEffect(contactX, contactY);
+    // two clones at 120 and 240 degrees just above the contact point
+    for (const angleDeg of [120, 240]) {
+      const s = (angleDeg * Math.PI) / 180;
+      const x = contactX + Math.sin(s) * M().spawnOffset;
+      const y = contactY + Math.cos(s) * M().spawnOffset;
+      this._spawnClone(x, y, ball.color);
     }
   }
 
-  _popFx(x, y) {
-    const spr = new Sprite(this.world.textures.glow);
-    spr.anchor.set(0.5);
-    spr.x = x;
-    spr.y = y;
-    spr.alpha = 0.9;
-    spr.scale.set(0.2);
-    spr.blendMode = "add";
-    this.world.fxLayer.addChild(spr);
-    tweenTo(spr.scale, { x: 1.4, y: 1.4 }, 0.35, ease.sineOut);
-    tweenTo(spr, { alpha: 0 }, 0.35, ease.sineIn, () => spr.destroy());
+  _spawnClone(x, y, color) {
+    const clone = Ball.spawn(this.world.textures, this.world.ballLayer2);
+    clone.setColor(color);
+    clone.position.set(x, y);
+    clone.initPhysics();
+    clone.spawnedByMultiplier = true;
+    this.world.physics.add(clone);
+    clone.playGlowEffect();
+    // dynamic one tick later, exactly like the original
+    this._nextTick.push(() => {
+      if (clone.destroyed || clone.capturedByCell || clone.takenByBox) return;
+      clone.physicsActive = true;
+    });
+  }
+
+  _spawnContactEffect(x, y) {
+    const fx = new Sprite(this.world.textures.glow);
+    fx.anchor.set(0.5);
+    fx.blendMode = "add";
+    fx.position.set(x, y);
+    const size = BALL_DIAMETER * 2.2;
+    fx.width = 1;
+    fx.height = 1;
+    fx.alpha = 1;
+    this.world.ballLayer2.addChild(fx);
+    const grow = { v: 0 };
+    tweenTo(grow, { v: 1 }, 0.4, ease.sineOut, () => fx.destroy());
+    const tick = () => {
+      if (fx.destroyed) return;
+      fx.width = size * grow.v;
+      fx.height = size * grow.v;
+      requestAnimationFrame(tick);
+    };
+    tick();
+    tweenTo(fx, { alpha: 0 }, 0.4, ease.sineIn);
   }
 }

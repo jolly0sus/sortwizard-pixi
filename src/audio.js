@@ -113,7 +113,8 @@ class AudioManager {
     this.play(SFX.multiplier);
   }
   playBallOnConveyor() {
-    this.play(SFX.ballOnConveyor, 0.5);
+    // the original plays every SFX at full volume through playOneShot
+    this.play(SFX.ballOnConveyor);
   }
   playBallInBox() {
     this.play(SFX.ballInBox);
