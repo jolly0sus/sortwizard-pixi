@@ -71,6 +71,9 @@ export const ECONOMY = {
   // balls can ever fill, so in practice the run ends by fail or by the pipes
   // running dry.
   maxCycles: 9,
+  // How long the board may sit with no move — nothing waiting fits anything
+  // open — before a tray is repainted to give it one back.
+  unjamDelay: 1,
   // With the pipes dry and the board locked, this long before the ending
   // screen — enough for a tray already swallowing a ball to finish and open
   // the next one, which can unlock the board after all.

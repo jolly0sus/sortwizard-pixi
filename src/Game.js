@@ -196,7 +196,7 @@ function buildScene(app, textures) {
     world.physics.step(dt);
     multiplier.update(dt);
     world.conveyor.update(dt);
-    world.fillBoxManager.update();
+    world.fillBoxManager.update(dt);
     sourceBoxManager.update(dt);
     tutorialHand.update(dt);
   };
