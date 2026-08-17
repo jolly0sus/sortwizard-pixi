@@ -58,13 +58,16 @@ export const ECONOMY = {
   // which is why the tray count matches the balls as they leave the boxes,
   // before the x3.
   //
-  // The same has to hold per colour or the balance is worthless: 8 boxes of a
-  // colour are 72 balls, 216 after the bars, and the 72 trays of that colour
-  // hold exactly 216. The original divided them differently — trays ran in
-  // pairs of a colour while boxes cycled — so demand and supply drifted apart,
-  // the surplus silted up the belt, and no run could be finished.
-  boxColors: [COLORS.BLUE, COLORS.PINK, COLORS.ORANGE],
-  boxesPerColor: 8,
+  // Each pipe is one colour for the whole run: slot 0 (centre) pink, slot 1
+  // (left) orange, slot 2 (right) blue — the reference's opening layout, held
+  // for all eight boxes a pipe delivers. This is what makes careful play
+  // always able to win: the tape's waves ask for specific colours at specific
+  // times, and with all three colours on tap at any moment the player can
+  // always answer. Every shuffled queue tried before this could refuse the
+  // needed colour for boxes on end, and every such drought was a measured
+  // loss the player could do nothing about. 8 boxes per pipe x 9 balls x 3 =
+  // 216 per colour, exactly its 72 trays.
+  slotColors: [COLORS.PINK, COLORS.ORANGE, COLORS.BLUE],
   // The reference's tray tape, restored: rows repeat blue, blue, pink, pink,
   // orange, orange; the four initial rows consume indices 0..3 and afterwards
   // every column continues the tape at its own pace. This is what makes the
@@ -94,7 +97,16 @@ export const ECONOMY = {
   // strictly worse — 33 trays against the aligned tape's 174 — because
   // shifting kills the waves: a 27-ball burst met 6-12 open slots and the
   // rest silted up the belt at once.)
-  traysPerColumn: 54,
+  //
+  // The 216 are a quota for the BOARD, not 54 per column. The belt feeds the
+  // leftmost matching column first, so the left columns do far more of the
+  // work: with a per-column cap they hit it and went dead while the right
+  // ones still lagged, and both a patient and an ordinary player stalled at
+  // exactly 200 of 216 with 48 balls that no surviving column wanted. Any
+  // column may keep producing until the board's total is reached, which also
+  // keeps every colour served — a prefix of the 6-tape is always within one
+  // of even.
+  traysTotal: 216,
   // With the pipes dry and the board locked, this long before the ending
   // screen — enough for a tray already swallowing a ball to finish and open
   // the next one, which can unlock the board after all.

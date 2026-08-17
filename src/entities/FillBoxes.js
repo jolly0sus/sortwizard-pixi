@@ -397,6 +397,8 @@ export class FillBoxManager {
     this.columns = [[], [], [], []];
     this.columnBusy = [false, false, false, false];
     this.colConsumed = [0, 0, 0, 0];
+    this.traysCreated = 0;
+    this.trayColorCount = new Map();
     this.totalFilled = 0;
     this.onAllBoxesFilled = null;
     this._queue = [];
@@ -425,14 +427,29 @@ export class FillBoxManager {
   // The reference's tape: the row index walks rowColorSequence, shared
   // initial rows first, then each column continuing at its own pace. See the
   // note on rowColorSequence in config.js.
+  //
+  // A colour that has already had its full share is skipped, and the tape
+  // moves on to the next one that has not. Columns stop at different points
+  // in the tape — the belt feeds the left ones more — so without this the
+  // last few trays came out a colour or two lopsided, and the economy has no
+  // slack at all: 648 balls for 648 slots. Measured, that ended a clean run
+  // three trays short, holding 9 balls against 9 slots of the wrong colour.
   _colorFor(colIndex, rowIndex) {
     const seq = ECONOMY.rowColorSequence;
-    return seq[((rowIndex % seq.length) + seq.length) % seq.length];
+    const share = ECONOMY.traysTotal / 3;
+    for (let k = 0; k < seq.length; k++) {
+      const color = seq[(rowIndex + k) % seq.length];
+      if ((this.trayColorCount.get(color) ?? 0) < share) return color;
+    }
+    return seq[rowIndex % seq.length];
   }
 
   _createBox(colIndex, rowIndex) {
-    if (rowIndex >= ECONOMY.traysPerColumn) return null;
-    const box = new FillBox(this, this._colorFor(colIndex, rowIndex));
+    if (this.traysCreated >= ECONOMY.traysTotal) return null;
+    this.traysCreated++;
+    const color = this._colorFor(colIndex, rowIndex);
+    this.trayColorCount.set(color, (this.trayColorCount.get(color) ?? 0) + 1);
+    const box = new FillBox(this, color);
     box.onBoxReserved = () => this._onBoxReserved(colIndex);
     box.onBoxFilled = () => {
       this.totalFilled++;
@@ -487,8 +504,7 @@ export class FillBoxManager {
       this.onAllBoxesFilled?.();
       return;
     }
-    const total = ECONOMY.traysPerColumn * this.columns.length;
-    if (this.totalFilled >= total) this.onAllBoxesFilled?.();
+    if (this.totalFilled >= ECONOMY.traysTotal) this.onAllBoxesFilled?.();
   }
 
   // Takes the whole receiver grid off the board once the run is decided:

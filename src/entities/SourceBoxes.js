@@ -13,53 +13,6 @@ import { tweenTo, ease, delay, stopTweensOf } from "../tween.js";
 
 const B = () => LAYOUT.sourceBox;
 
-// The colours the 24 boxes of a run arrive in: eight of each, so the balls
-// coming in every colour match the trays waiting for them exactly.
-//
-// Shuffled, because a fixed cycle of three colours shared by three pipes gives
-// each pipe the same colour every time round — the run turns into pressing the
-// same three buttons in the same order from start to finish. Two constraints
-// keep the shuffle playable against the tray tape:
-//
-//  - never more than two of a colour in a row: three would put the same
-//    colour in all three pipes at once and leave nothing to choose between;
-//  - no colour missing for more than four boxes in a row. The trays cycle
-//    colours in pairs, so a column regularly waits for a specific colour to
-//    move; the reference's strict cycle never leaves a colour unseen for
-//    more than two boxes, and an unconstrained shuffle can go ten — a
-//    drought that starves the tape and deadlocks the board.
-//
-// Built by always drawing from the colours with the most left (droughted
-// colours forced first), which cannot paint itself into a corner the way a
-// reshuffle-until-valid can.
-function buildBoxColors() {
-  const left = new Map(
-    ECONOMY.boxColors.map((c) => [c, ECONOMY.boxesPerColor]),
-  );
-  const out = [];
-  const total = ECONOMY.boxColors.length * ECONOMY.boxesPerColor;
-  while (out.length < total) {
-    const banned =
-      out.length >= 2 && out[out.length - 1] === out[out.length - 2]
-        ? out[out.length - 1]
-        : null;
-    const choices = ECONOMY.boxColors.filter(
-      (c) => left.get(c) > 0 && c !== banned,
-    );
-    const recent = out.slice(-4);
-    const starved = choices.filter(
-      (c) => left.get(c) > 0 && !recent.includes(c),
-    );
-    const pool = starved.length && out.length >= 4 ? starved : choices;
-    const most = Math.max(...pool.map((c) => left.get(c)));
-    const best = pool.filter((c) => left.get(c) === most);
-    const pick = best[Math.floor(Math.random() * best.length)];
-    out.push(pick);
-    left.set(pick, left.get(pick) - 1);
-  }
-  return out;
-}
-
 class Box {
   constructor(manager, slotIndex) {
     this.manager = manager;
@@ -280,14 +233,12 @@ export class SourceBoxManager {
     this._buildPipes();
 
     this.pipeCharges = [...ECONOMY.pipeCharges];
-    // The three standing boxes are the front of the same queue the pipes draw
-    // from, so the eight-per-colour balance covers the whole run.
-    this.boxColors = buildBoxColors();
-    this.colorCursor = 0;
+    // Each slot is one colour for the whole run — see slotColors in
+    // config.js: this is what lets careful play always answer the tape.
     this.boxes = [];
     for (let i = 0; i < 3; i++) {
       const box = new Box(this, i);
-      box.placeInstant(this._pickNextBoxColor());
+      box.placeInstant(ECONOMY.slotColors[i]);
       this.boxes.push(box);
       this._updatePipeLabel(i);
     }
@@ -371,17 +322,11 @@ export class SourceBoxManager {
     return this.boxes.filter((b) => b.alive);
   }
 
-  _pickNextBoxColor() {
-    const color = this.boxColors[this.colorCursor % this.boxColors.length];
-    this.colorCursor++;
-    return color;
-  }
-
   _onBoxEmpty(slotIndex) {
     if (this.pipeCharges[slotIndex] > 0) {
       this.pipeCharges[slotIndex]--;
       this._updatePipeLabel(slotIndex);
-      const color = this._pickNextBoxColor();
+      const color = ECONOMY.slotColors[slotIndex];
       delay(0.2, () => this.boxes[slotIndex].playEntryAnimation(color));
     } else {
       delay(0.5, () => this._checkVictory());
@@ -472,11 +417,10 @@ export class SourceBoxManager {
         if ((box.alive || box.isAnimating) && open.has(box.color))
           anyMove = true;
       }
-      // a charged pipe will refill its slot with the next queue colour
+      // a charged pipe refills its slot with the slot's own colour
       for (let slot = 0; slot < 3; slot++) {
-        if (this.pipeCharges[slot] > 0) {
-          const next = this.boxColors[this.colorCursor % this.boxColors.length];
-          if (open.has(next)) anyMove = true;
+        if (this.pipeCharges[slot] > 0 && open.has(ECONOMY.slotColors[slot])) {
+          anyMove = true;
         }
       }
     }
