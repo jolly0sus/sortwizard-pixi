@@ -18,12 +18,20 @@ const B = () => LAYOUT.sourceBox;
 //
 // Shuffled, because a fixed cycle of three colours shared by three pipes gives
 // each pipe the same colour every time round — the run turns into pressing the
-// same three buttons in the same order from start to finish. Never more than
-// two of a colour in a row, though: three would put the same colour in all
-// three pipes at once and leave nothing to choose between.
+// same three buttons in the same order from start to finish. Two constraints
+// keep the shuffle playable against the tray tape:
 //
-// Built by always drawing from the colours with the most left, which cannot
-// paint itself into a corner the way a reshuffle-until-valid can.
+//  - never more than two of a colour in a row: three would put the same
+//    colour in all three pipes at once and leave nothing to choose between;
+//  - no colour missing for more than four boxes in a row. The trays cycle
+//    colours in pairs, so a column regularly waits for a specific colour to
+//    move; the reference's strict cycle never leaves a colour unseen for
+//    more than two boxes, and an unconstrained shuffle can go ten — a
+//    drought that starves the tape and deadlocks the board.
+//
+// Built by always drawing from the colours with the most left (droughted
+// colours forced first), which cannot paint itself into a corner the way a
+// reshuffle-until-valid can.
 function buildBoxColors() {
   const left = new Map(
     ECONOMY.boxColors.map((c) => [c, ECONOMY.boxesPerColor]),
@@ -38,8 +46,13 @@ function buildBoxColors() {
     const choices = ECONOMY.boxColors.filter(
       (c) => left.get(c) > 0 && c !== banned,
     );
-    const most = Math.max(...choices.map((c) => left.get(c)));
-    const best = choices.filter((c) => left.get(c) === most);
+    const recent = out.slice(-4);
+    const starved = choices.filter(
+      (c) => left.get(c) > 0 && !recent.includes(c),
+    );
+    const pool = starved.length && out.length >= 4 ? starved : choices;
+    const most = Math.max(...pool.map((c) => left.get(c)));
+    const best = pool.filter((c) => left.get(c) === most);
     const pick = best[Math.floor(Math.random() * best.length)];
     out.push(pick);
     left.set(pick, left.get(pick) - 1);
@@ -286,7 +299,6 @@ export class SourceBoxManager {
     this._idleTimer = 0;
     this._stallTimer = 0;
     this._lastUnsorted = -1;
-    this._overflowTimer = 0;
   }
 
   // Balls that do not exist yet: what the standing boxes still hold plus every
@@ -389,34 +401,7 @@ export class SourceBoxManager {
       this._checkFail();
       this._checkVictory();
     }
-    this._checkOverflow(dt);
     this._checkEndOfSupply(dt);
-  }
-
-  // The loss that is actually reachable: drowning the board. Every colour
-  // always has an open tray (one-colour columns), so the belt always drains
-  // and the old jam cannot happen — but a player who keeps tapping into a
-  // saturated board buries it faster than it can drain. A heap of
-  // overflowFreeBalls loose balls that refuses to shrink for overflowSeconds
-  // is that player, not a slow patch: bursts decay through the threshold in
-  // seconds (see the sizing note in config.js).
-  //
-  // Skipped once the pipes are dry — the endgame always resolves by sorting
-  // or by the stall backstop, and losing on the last boxes' splash when the
-  // win is already inevitable would be pure spite.
-  _checkOverflow(dt) {
-    if (this.ballsPending() === 0) {
-      this._overflowTimer = 0;
-      return;
-    }
-    if (Ball.getFreeBallCount() < ECONOMY.overflowFreeBalls) {
-      this._overflowTimer = 0;
-      return;
-    }
-    this._overflowTimer += dt;
-    if (this._overflowTimer < ECONOMY.overflowSeconds) return;
-    this._failTriggered = true;
-    this._endRun(this.world.failWindow);
   }
 
   _checkVictory() {
@@ -464,6 +449,47 @@ export class SourceBoxManager {
     }
   }
 
+  // The tape can also lock the board with boxes still to deliver: the fronts
+  // want colours that neither the riding balls nor any remaining box can
+  // supply, and the riders' colours have no open tray. No tap changes any of
+  // that — a burst of a colour with no open front just rides — so the run is
+  // provably lost while the game sits waiting for input forever. The
+  // reference does sit forever; this ends it as the loss it already is.
+  // Settled balls only (free == 0): balls still falling can land in a tray
+  // and advance a column, which reopens everything.
+  _checkColorDeadlock(dt) {
+    if (Ball.getFreeBallCount() > 0) {
+      this._deadlockTimer = 0;
+      return;
+    }
+    const open = this.world.fillBoxManager.getOpenBoxColors();
+    let anyMove = false;
+    for (const color of Ball.getUnsortedColors()) {
+      if (open.has(color)) anyMove = true;
+    }
+    if (!anyMove) {
+      for (const box of this.boxes) {
+        if ((box.alive || box.isAnimating) && open.has(box.color))
+          anyMove = true;
+      }
+      // a charged pipe will refill its slot with the next queue colour
+      for (let slot = 0; slot < 3; slot++) {
+        if (this.pipeCharges[slot] > 0) {
+          const next = this.boxColors[this.colorCursor % this.boxColors.length];
+          if (open.has(next)) anyMove = true;
+        }
+      }
+    }
+    if (anyMove) {
+      this._deadlockTimer = 0;
+      return;
+    }
+    this._deadlockTimer = (this._deadlockTimer ?? 0) + dt;
+    if (this._deadlockTimer < ECONOMY.outOfBallsStall) return;
+    this._failTriggered = true;
+    this._endRun(this.world.failWindow);
+  }
+
   // Nothing new enters the board once the pipes are dry, so the run lives or
   // dies on the balls already out. It can still advance as long as one of them
   // matches a tray that is open right now; if none does, no front tray can
@@ -477,6 +503,7 @@ export class SourceBoxManager {
   _checkEndOfSupply(dt) {
     if (this._failTriggered || this._victoryTriggered) return;
     if (this.ballsPending() > 0) {
+      this._checkColorDeadlock(dt);
       this._idleTimer = 0;
       this._stallTimer = 0;
       this._lastUnsorted = -1;
@@ -510,29 +537,23 @@ export class SourceBoxManager {
       this._stallTimer < ECONOMY.outOfBallsStall
     )
       return;
-    // Using the supply up is finishing the level, so this is the win.
-    //
-    // It has to be, or the level cannot be completed at all. Trays are only
-    // added while the balls left outnumber the slots already waiting, so from
-    // the moment that stops there are at least as many slots as balls, and
-    // sorting takes one of each. The grid therefore still has slots open when
-    // the last ball is gone unless the two matched exactly and every leftover
-    // ball found its colour — which is a knife's edge, not a level. Scoring
-    // this as a loss made every possible run a loss.
-    this._victoryTriggered = true;
-    this._endRun(this.world.victoryWindow);
+    // Reference semantics: running out of balls is only the win if the job
+    // is done. Leftover balls facing trays nothing can fill any more is a
+    // loss, and with the counts exact (216 trays for 216 box-balls) it is a
+    // loss the player earned — a clean run drains the grid to nothing and
+    // takes the victory branch through _checkVictory above. The blanket
+    // "supply spent = win" this replaces dated from the mismatched economy,
+    // where no run could ever finish.
+    this._checkVictory();
+    if (this._victoryTriggered) return;
+    this._failTriggered = true;
+    this._endRun(this.world.failWindow);
   }
 
   // Fail: the belt is completely full and none of the colours riding it can
   // go into any currently open receiver box.
   _checkFail() {
     if (this._failTriggered || this._victoryTriggered) return;
-    // Only a jam the player can still be rescued from is a loss. Once the
-    // pipes are dry there is no rescue and no next move to spoil: the board
-    // locking up is simply how the level ends, and _checkEndOfSupply owns it.
-    // Without this the endgame was a race the player always lost — draining
-    // columns leave fewer open colours, which is exactly what fills the belt.
-    if (this.ballsPending() === 0) return;
     const conveyor = this.world.conveyor;
     if (!conveyor.cells.length) return;
     if (!conveyor.isFull()) return;

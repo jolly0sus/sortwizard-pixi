@@ -47,26 +47,8 @@ export const ECONOMY = {
   // the pipe. Decrements when an emptied box finishes disappearing.
   pipeCharges: [7, 7, 7],
   // While this many balls are loose on the board (not riding the belt, not in
-  // a tray), taps are refused and the box shakes. Two boxes' worth after the
-  // multipliers: high enough that a player CAN over-commit — the original's 27
-  // blocked the second tap outright, which paced even blind spam into a win
-  // and made the run unlosable.
-  maxFreeBalls: 54,
-  // The loss: drowning the board. With every colour always having an open
-  // tray (see trayColumnColors), the belt always drains, so a jam can no
-  // longer kill the run — flooding it can. A heap of this many loose balls
-  // that refuses to shrink for this long is a player who kept tapping into a
-  // board with nowhere to put anything. The heap alone is the signal: a
-  // belt-full test was tried first and never held, because trays constantly
-  // pull balls off the belt and the freed cell rides empty to the capture
-  // zone, blinking the condition off.
-  //
-  // Numbers sized against the measured drain of ~4.5 balls/s: one tap tops
-  // out near 53 loose and even a second tap at ~74 decays through 45 in
-  // about 7 s, so bursts survive; only sustained spam pins the heap above
-  // the threshold for the full 8 s.
-  overflowFreeBalls: 45,
-  overflowSeconds: 8,
+  // a tray), taps are refused and the box shakes. The reference's value.
+  maxFreeBalls: 27,
 
   // --- the run's economy, balanced colour by colour ------------------------
   //
@@ -83,23 +65,36 @@ export const ECONOMY = {
   // the surplus silted up the belt, and no run could be finished.
   boxColors: [COLORS.BLUE, COLORS.PINK, COLORS.ORANGE],
   boxesPerColor: 8,
-  // Every column is one colour for the whole run. Nothing weaker survives
-  // measurement:
+  // The reference's tray tape, restored: rows repeat blue, blue, pink, pink,
+  // orange, orange; the four initial rows consume indices 0..3 and afterwards
+  // every column continues the tape at its own pace. This is what makes the
+  // reference's loss REAL — the colours open at any moment are whatever the
+  // tape happens to be showing, so a belt full of colours nothing is open for
+  // is a jam, and the jam is the fail. One-colour columns were tried and made
+  // the game unlosable: every riding ball always had an open tray, so the
+  // belt always drained. (An overflow-heap loss patched over that; the
+  // reference was probed instead — flooding it jams the belt and fails in
+  // ~20 s — and this is that mechanism.)
   //
-  //  - a per-tray cycle left 6 open slots facing a 27-ball burst: lost in 16 s
-  //  - blocks of 18 drifted out of step as the columns advanced at the
-  //    player's pace: lost in 103 s with a belt full of one colour
-  //  - three fixed columns plus one cycling column forced the tail of the run
-  //    into the cycling column's block order, while the box queue arrives
-  //    shuffled: the run hung with five boxes undeliverable
-  //
-  // A colour with its own column is open exactly as long as boxes of that
-  // colour remain — its capacity IS that colour's ball count — so any box in
-  // the queue can always be tapped and the belt can always drain, in any
-  // order. Blue takes two columns; the caps make each colour's 72 trays come
-  // out exactly.
-  trayColumnColors: [COLORS.BLUE, COLORS.PINK, COLORS.ORANGE, COLORS.BLUE],
-  trayColumnCaps: [36, 72, 72, 36],
+  // Unlike the reference, the totals still come out even: 54 trays per
+  // column x 4 = 216 = the balls the boxes release before the x3, and each
+  // column's 54 walk the 6-tape exactly 9 times, so every colour gets 72
+  // trays = its 216 multiplied balls. A clean run can still finish.
+  rowColorSequence: [
+    COLORS.BLUE,
+    COLORS.BLUE,
+    COLORS.PINK,
+    COLORS.PINK,
+    COLORS.ORANGE,
+    COLORS.ORANGE,
+  ],
+  // The columns start the tape aligned, exactly like the reference: whole
+  // monochrome rows, so a tapped box meets a 24-slot wave of its colour.
+  // (A phase-shifted start was tried to spread the colours and measured
+  // strictly worse — 33 trays against the aligned tape's 174 — because
+  // shifting kills the waves: a 27-ball burst met 6-12 open slots and the
+  // rest silted up the belt at once.)
+  traysPerColumn: 54,
   // With the pipes dry and the board locked, this long before the ending
   // screen — enough for a tray already swallowing a ball to finish and open
   // the next one, which can unlock the board after all.

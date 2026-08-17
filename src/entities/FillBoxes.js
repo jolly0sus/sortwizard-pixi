@@ -422,17 +422,17 @@ export class FillBoxManager {
     this._queue.push(fn);
   }
 
-  // A column is one colour for its whole life — see trayColumnColors in
-  // config.js for why nothing weaker survives. Its cap is that colour's share
-  // of the run's balls, so it runs out of trays exactly as the colour runs out
-  // of boxes.
-  _colorFor(colIndex) {
-    return ECONOMY.trayColumnColors[colIndex];
+  // The reference's tape: the row index walks rowColorSequence, shared
+  // initial rows first, then each column continuing at its own pace. See the
+  // note on rowColorSequence in config.js.
+  _colorFor(colIndex, rowIndex) {
+    const seq = ECONOMY.rowColorSequence;
+    return seq[((rowIndex % seq.length) + seq.length) % seq.length];
   }
 
   _createBox(colIndex, rowIndex) {
-    if (rowIndex >= ECONOMY.trayColumnCaps[colIndex]) return null;
-    const box = new FillBox(this, this._colorFor(colIndex));
+    if (rowIndex >= ECONOMY.traysPerColumn) return null;
+    const box = new FillBox(this, this._colorFor(colIndex, rowIndex));
     box.onBoxReserved = () => this._onBoxReserved(colIndex);
     box.onBoxFilled = () => {
       this.totalFilled++;
@@ -487,7 +487,7 @@ export class FillBoxManager {
       this.onAllBoxesFilled?.();
       return;
     }
-    const total = ECONOMY.trayColumnCaps.reduce((a, b) => a + b, 0);
+    const total = ECONOMY.traysPerColumn * this.columns.length;
     if (this.totalFilled >= total) this.onAllBoxesFilled?.();
   }
 
